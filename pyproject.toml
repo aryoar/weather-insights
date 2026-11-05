@@ -10,7 +10,9 @@ requires-python = ">=3.11"
 dependencies = [
     "requests",
     "python-dotenv",
-    "streamlit",
+    "streamlit>=1.41",
     "pandas",
-    "plotly",
 ]
+
+[tool.setuptools.packages.find]
+where = ["src"]

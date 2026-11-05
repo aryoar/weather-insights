@@ -1,0 +1,22 @@
+# API credentials. Keep variables.env.example tracked as the setup template.
+variables.env
+.env
+.env.*
+!.env.example
+
+# Python environments and generated files.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Test and tool caches.
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local Streamlit credentials.
+.streamlit/secrets.toml
