@@ -1,0 +1,2 @@
+observed_at,city,country,latitude,longitude,temperature_c,feels_like_c,humidity_pct,pressure_hpa,wind_speed_mps,wind_direction_deg,wind_gust_mps,visibility_m,clouds_pct,description
+2026-11-08T11:39:23.610739+00:00,Madrid,ES,,,12.87,12.25,78,,4.12,,,,,Clear sky
