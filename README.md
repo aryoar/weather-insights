@@ -31,9 +31,12 @@ On **Live Conditions**, add locations and fetch current conditions. Successful f
 
 ## Project structure
 
-- `src/weather_app/client.py`: generic JSON API client and OpenWeatherMap client
+- `src/weather_app/client.py`: generic JSON API client (`APIClient`) and one subclass per provider: OpenWeatherMap (`WeatherClient`) and aviationweather.gov (`AviationWeatherClient`, free, no key)
 - `src/weather_app/models.py`: validated weather snapshot and computed metrics
+- `src/weather_app/reports.py`: METAR (observed) and TAF (forecast) airport reports, translated into plain language
+- `src/weather_app/glossary.py`: plain-language explanations of aviation terms, used as tooltips
 - `src/weather_app/storage.py`: append-only CSV history
 - `src/weather_app/analytics.py`: trend, comparison, and ranking calculations
-- `app.py`: Streamlit interface
+- `app.py`: Streamlit entry point and sidebar navigation
+- `views/`: one file per Streamlit page (airport weather, route overview, winds aloft, airport suitability, fuel planner)
 - `PROMPTS.md`: AI collaboration record

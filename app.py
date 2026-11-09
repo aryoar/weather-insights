@@ -7,12 +7,28 @@ from weather_app.client import WeatherClient
 from weather_app.config import get_api_key
 from weather_app.storage import WeatherStore
 
-st.set_page_config(page_title="Weather Insights", page_icon="🌤️", layout="wide")
-st.title("Weather Insights")
-st.caption("Live conditions and analytics built from observations collected by this app.")
+from views import airport_suitability, airport_weather, fuel_planner, route_overview, winds_aloft
+
+st.set_page_config(page_title="Weather Insights: aviation briefing", page_icon="✈️", layout="wide")
+st.title("✈️ Weather Insights: aviation weather briefing")
+st.caption(
+    "Real weather for a flight, explained in plain language. "
+    "For learning and demonstration only: not for real flight planning."
+)
 
 store = WeatherStore()
-page = st.sidebar.radio("View", ["Live Conditions", "Analytics"])
+page = st.sidebar.radio(
+    "View",
+    [
+        "Airport weather",
+        "Route overview",
+        "Winds aloft",
+        "Airport suitability",
+        "Fuel planner",
+        "Live Conditions",
+        "Analytics",
+    ],
+)
 
 if page == "Live Conditions":
     st.header("Live Conditions")
@@ -97,3 +113,16 @@ elif page == "Analytics":
             hide_index=True,
             use_container_width=True,
         )
+
+# Aviation pages: each one lives in its own file in views/, so teammates can work on
+# different pages without editing the same lines here.
+elif page == "Airport weather":
+    airport_weather.render()
+elif page == "Route overview":
+    route_overview.render()
+elif page == "Winds aloft":
+    winds_aloft.render()
+elif page == "Airport suitability":
+    airport_suitability.render()
+elif page == "Fuel planner":
+    fuel_planner.render()
