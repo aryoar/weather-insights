@@ -61,6 +61,8 @@ if page == "Live Conditions":
                         st.session_state.storage_errors[snapshot.location] = (
                             "Conditions were fetched but could not be saved to local history."
                         )
+                    except ValueError as exc:
+                        st.session_state.storage_errors[snapshot.location] = str(exc)
                 st.session_state.latest_snapshots = snapshots
                 st.session_state.fetch_errors = failures
             except RuntimeError as exc:
