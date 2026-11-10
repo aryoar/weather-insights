@@ -5,6 +5,7 @@ turn each failure into a clear error). Each subclass only knows WHICH API to cal
 what its answers mean:
 - WeatherClient: OpenWeatherMap (needs an API key)
 - AviationWeatherClient: aviationweather.gov METAR/TAF reports (free, no key)
+- OpenMeteoClient: Open-Meteo model winds and temperature at altitude (free, no key)
 """
 
 from typing import Any, Callable
@@ -13,6 +14,7 @@ import requests
 
 from .models import LocationSnapshot, snapshot_from_api
 from .reports import MetarReport, TafReport, clean_icao_code, metar_from_api, taf_from_api
+from .winds import FLIGHT_LEVELS, WindLevel, wind_levels_from_api
 
 
 class APIClient:
@@ -180,3 +182,37 @@ class AviationWeatherClient(APIClient):
                     "or this airport does not publish one."
                 )
         return reports, errors
+
+
+class OpenMeteoClient(APIClient):
+    """Open-Meteo forecast client for winds aloft. Free, no key, under 10,000 calls a day.
+
+    Gives model wind and temperature at pressure levels (850 to 200 hPa), which we
+    present as approximate flight levels. This is model data, not an official chart.
+    """
+
+    provider_name = "Open-Meteo"
+
+    def __init__(self, timeout: float = 10.0) -> None:
+        super().__init__("https://api.open-meteo.com/v1", timeout=timeout)
+
+    def winds_at(self, latitude: float, longitude: float) -> list[WindLevel]:
+        """Current model wind and temperature at each cruise height above one point, lowest first."""
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            raise ValueError("Coordinates out of range (latitude −90 to 90, longitude −180 to 180).")
+        variables = [
+            f"{name}_{hpa}hPa"
+            for hpa in FLIGHT_LEVELS
+            for name in ("wind_speed", "wind_direction", "temperature")
+        ]
+        payload = self._get(
+            "forecast",
+            {
+                "latitude": latitude,
+                "longitude": longitude,
+                "current": ",".join(variables),
+                "wind_speed_unit": "kn",
+                "timezone": "GMT",
+            },
+        )
+        return wind_levels_from_api(payload)
