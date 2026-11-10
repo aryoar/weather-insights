@@ -65,3 +65,18 @@ Keep this running as you go — don't reconstruct it from memory at the end.
 **Checked:** Reviewed the cache key and storage key (`icao` plus the cached `fetched_at` timestamp). Syntax compilation and `git diff --check` passed. METAR and TAF request failures are handled separately, so one report type failing does not discard successful METARs. No API requests or automated tests were run for this change.
 
 **Kept as-is.**
+
+---
+
+## Feature: Open-Meteo winds aloft client and headwind formula (Winds aloft, first step)
+
+**Asked (Claude Code, Opus 5.5):** "Start step 2": the first small step for the Winds aloft page from the team plan: an `OpenMeteoClient(APIClient)` in `client.py` with one method returning wind and temperature at the cruise pressure levels for one coordinate, plus a test for the headwind formula (on the nose at 30 kt = +30, from behind = −30, from the side = 0).
+
+**Got:**
+- `winds.py` (new): `FLIGHT_LEVELS` (850 hPa ≈ FL050 … 200 hPa ≈ FL390), `headwind_component()` (wind speed × cos(wind direction − route direction)), and a `WindLevel` class with properties `flight_level`, `altitude_ft`, `altitude_m`, `wind_speed_kmh`, a `headwind_kt(route_direction)` method, `__str__`/`__repr__`, and `__lt__` so `sorted()` goes from low to high. `wind_levels_from_api()` leaves out levels the model did not report instead of inventing values.
+- `client.py`: `OpenMeteoClient(APIClient)` with `winds_at(lat, lon)`. It needs no key, checks the coordinate range before calling the API, and asks for wind in knots. Errors go through the shared `APIClient._get` handling.
+- `tests/test_winds.py`: known-answer tests for the formula (+30 / −30 / 0, and 15 kt at 60°), the `WindLevel` properties, and parsing a hand-made response.
+
+**Checked:** First called Open-Meteo by hand. The `current=` parameter accepts pressure-level variables, and an out-of-range latitude returns HTTP 400. Ran `winds_at(40.47, -3.56)` (Madrid) live: it returned all six levels with plausible values (about 69 kt from 251° at FL340, −51 °C). A bad coordinate gives a clear `ValueError` before any request. `PYTHONPATH=src pytest tests` passed (8 tests).
+
+**Kept as-is / changed / rejected:** Kept. Used `current=` rather than hourly forecasts because the page shows conditions now. Still to do: multi-point fetch along the route (needs `geo.py`), the page itself, and `average_headwind_kt(route, level)` for the Fuel planner.
