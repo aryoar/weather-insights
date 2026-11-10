@@ -30,4 +30,8 @@ GLOSSARY = {
     "BECMG": "In a TAF: conditions gradually changing to a new state during the period.",
     "PROB30 / PROB40": "In a TAF: a 30% or 40% chance that these conditions happen.",
     "FM": "In a TAF: 'from this time', a lasting change that starts at the given time.",
+    "Nautical mile (nm)": "The distance unit used in aviation and at sea: 1 nm = 1.852 km, "
+                          "and one degree of latitude is 60 nm.",
+    "Great circle": "The shortest path between two points on the globe. On a flat map it looks "
+                    "curved, which is why long flights seem to 'bend' towards the poles.",
 }

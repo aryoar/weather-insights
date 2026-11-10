@@ -87,6 +87,14 @@ class WeatherClient(APIClient):
             raise LookupError(f"City '{cleaned_city}' was not found. Check the spelling and try again.") from None
         return snapshot_from_api(cleaned_city, payload)
 
+    def current_at(self, latitude: float, longitude: float, label: str) -> LocationSnapshot:
+        """Current weather at a position (e.g. a point along a route, possibly over the sea).
+        `label` is used as the name when OpenWeatherMap has no nearby place name."""
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            raise ValueError(f"Coordinates ({latitude}, {longitude}) are outside the valid range.")
+        payload = self._get("weather", {"lat": round(latitude, 4), "lon": round(longitude, 4), "units": "metric"})
+        return snapshot_from_api(label, payload)
+
     def current_many(self, cities: list[str]) -> tuple[list[LocationSnapshot], dict[str, str]]:
         """Fetch each location independently, returning successes and clear failures."""
         snapshots: list[LocationSnapshot] = []
@@ -115,6 +123,26 @@ class AviationWeatherClient(APIClient):
     def tafs(self, codes: list[str]) -> tuple[list[TafReport], dict[str, str]]:
         """Current official forecast for each airport, plus a message for each one that failed."""
         return self._fetch_reports("taf", codes, taf_from_api)
+
+    def metars_in_area(self, min_lat: float, min_lon: float, max_lat: float, max_lon: float) -> tuple[list[MetarReport], int]:
+        """Latest METAR of every reporting airport inside a box (one request).
+        Returns the reports and how many entries could not be read and were skipped."""
+        if not (-90 <= min_lat < max_lat <= 90 and -180 <= min_lon < max_lon <= 180):
+            raise ValueError("The map area is not a valid latitude/longitude box.")
+        box = ",".join(f"{value:.2f}" for value in (min_lat, min_lon, max_lat, max_lon))
+        payload = self._get("metar", {"bbox": box, "format": "json"}) or []
+        reports: list[MetarReport] = []
+        found: set[str] = set()
+        skipped = 0
+        for item in payload:
+            if item.get("icaoId") in found:
+                continue
+            try:
+                reports.append(metar_from_api(item))
+                found.add(item["icaoId"])
+            except ValueError:
+                skipped += 1
+        return reports, skipped
 
     def _fetch_reports(self, endpoint: str, codes: list[str], parse: Callable[[dict], Any]) -> tuple[list, dict[str, str]]:
         """One request for all valid codes. Invalid, unknown or unreadable airports are
