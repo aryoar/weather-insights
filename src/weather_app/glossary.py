@@ -34,4 +34,12 @@ GLOSSARY = {
                           "and one degree of latitude is 60 nm.",
     "Great circle": "The shortest path between two points on the globe. On a flat map it looks "
                     "curved, which is why long flights seem to 'bend' towards the poles.",
+    "Flight level (FL)": "Cruise height in hundreds of feet, measured with a standard pressure setting: "
+                         "FL340 = about 34,000 ft = about 10.4 km.",
+    "Headwind / tailwind": "A headwind blows against the aircraft: it flies slower over the ground and "
+                           "burns more fuel. A tailwind blows from behind: faster and less fuel.",
+    "Winds aloft": "The wind high above the ground, at the heights aircraft cruise. It is often much "
+                   "stronger than the wind at the airport, especially in the jet stream.",
+    "Pressure level (hPa)": "Weather models report the upper air at fixed air pressures instead of "
+                            "heights. Lower pressure = higher up: 250 hPa is roughly FL340.",
 }

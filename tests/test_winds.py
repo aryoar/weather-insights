@@ -2,7 +2,15 @@
 
 import pytest
 
-from weather_app.winds import WindLevel, headwind_component, wind_levels_from_api
+from weather_app.winds import (
+    RouteWinds,
+    WindLevel,
+    bearing_deg,
+    best_level_hint,
+    headwind_component,
+    tracks_along,
+    wind_levels_from_api,
+)
 
 
 def test_wind_on_the_nose_is_full_headwind():
@@ -49,3 +57,45 @@ def test_parse_skips_missing_levels_and_sorts_lowest_first():
 def test_parse_rejects_response_without_current_data():
     with pytest.raises(ValueError):
         wind_levels_from_api({"error": True})
+
+
+# ---------------------------------------------------------------- along a route ----
+
+def test_bearing_due_north_and_due_east():
+    assert bearing_deg(0, 0, 10, 0) == pytest.approx(0)
+    assert bearing_deg(0, 0, 0, 10) == pytest.approx(90)
+    assert bearing_deg(10, 0, 0, 0) == pytest.approx(180)
+
+
+def test_tracks_along_has_one_direction_per_point():
+    points = [(0, 0), (0, 5), (0, 10)]  # flying east along the equator
+    assert tracks_along(points) == pytest.approx([90, 90, 90])
+
+
+def _levels(direction_by_fl: dict[int, float], speed: float = 40) -> list[WindLevel]:
+    hpa_for = {50: 850, 100: 700, 180: 500, 300: 300, 340: 250, 390: 200}
+    return [WindLevel(hpa_for[fl], speed, direction, -40) for fl, direction in direction_by_fl.items()]
+
+
+def test_route_winds_average_and_best_height():
+    # Flying east along the equator. At FL340 the wind comes from the west (behind: −40 kt);
+    # at FL300 it comes from the east (on the nose: +40 kt).
+    points = [(0, 0), (0, 5), (0, 10)]
+    per_point = [_levels({300: 90, 340: 270}) for _ in points]
+    winds = RouteWinds("TEST", 600, points, per_point)
+    assert winds.flight_levels == [300, 340]
+    assert winds.average_headwind_kt(300) == pytest.approx(40)
+    assert winds.average_headwind_kt(340) == pytest.approx(-40)
+    assert winds.best_flight_level == 340
+    assert winds.distances_nm == [0, 300, 600]
+    assert best_level_hint(winds) == "FL340 has the strongest tailwind on this route (+40 kt behind you)."
+
+
+def test_route_winds_skips_a_height_missing_at_one_point():
+    points = [(0, 0), (0, 10)]
+    per_point = [_levels({340: 270}), []]  # second point: model reported nothing
+    winds = RouteWinds("TEST", 600, points, per_point)
+    assert winds.headwinds_at(340) == [pytest.approx(-40), None]
+    assert winds.average_headwind_kt(340) == pytest.approx(-40)
+    with pytest.raises(LookupError):
+        winds.average_headwind_kt(300)
