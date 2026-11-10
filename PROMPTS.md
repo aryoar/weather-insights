@@ -45,3 +45,23 @@ Keep this running as you go — don't reconstruct it from memory at the end.
 **Kept as-is** _(Kept as-is after reviewing the diff)_
 
 ---
+
+## Feature: Twice-daily weather and METAR collection script
+
+**Asked:** "Do the logging script with argparse and a `__main__` guard. Each run logs OpenWeatherMap for a fixed list of cities and METARs for fixed airports. Run it at least twice a day until submission, and commit the logs."
+
+**Got:** Added `scripts/log_weather.py` for Madrid, London, Paris and LEMD, EGLL, LFPG, plus `MetarStore` in `src/weather_app/storage.py` to append timestamped METAR records to a separate CSV. Documented the collection command in `README.md`.
+
+**Checked:** `python scripts/log_weather.py --help` and syntax compilation succeeded. A live run on 2026-11-10 appended 3 OpenWeatherMap rows and 3 METAR rows; the weather log contains 11 rows across 3 observation dates, and the new METAR log contains 3 real airport reports. Existing weather rows and schema were preserved; `MetarStore` stores both collection time and METAR observation time.
+
+**Kept as-is.**
+
+## Feature: Save METAR reports fetched from the Streamlit page
+
+**Asked:** "Keep the fixed logger lists and also save successful airport METAR fetches from Streamlit to `metar_history.csv`, with protection from duplicate rows on reruns."
+
+**Got:** `views/airport_weather.py` now saves each successful METAR result through `MetarStore`. The cached fetch returns its UTC collection timestamp, and `MetarStore.append_if_new()` prevents Streamlit reruns from logging the same cached fetch twice. TAFs remain display-only.
+
+**Checked:** Reviewed the cache key and storage key (`icao` plus the cached `fetched_at` timestamp). Syntax compilation and `git diff --check` passed. METAR and TAF request failures are handled separately, so one report type failing does not discard successful METARs. No API requests or automated tests were run for this change.
+
+**Kept as-is.**

@@ -1,12 +1,15 @@
 """Airport weather page: real METAR (observed now) and TAF (forecast) reports for the
 departure, destination and alternate airports, from aviationweather.gov."""
 
+from datetime import datetime, timezone
+
 import pandas as pd
 import streamlit as st
 
 from weather_app.client import AviationWeatherClient
 from weather_app.glossary import GLOSSARY
 from weather_app.reports import M_PER_FOOT, clean_icao_code
+from weather_app.storage import MetarStore
 
 from .common import age_text, show_glossary
 
@@ -19,9 +22,18 @@ DEFAULT_CODES = {"Departure": "LEMD", "Destination": "EGLL", "Alternate": "LFPG"
 @st.cache_data(ttl=300, show_spinner="Fetching airport reports…")
 def _fetch_reports(codes: tuple[str, ...]):
     client = AviationWeatherClient()
-    metars, metar_errors = client.metars(list(codes))
-    tafs, taf_errors = client.tafs(list(codes))
-    return metars, metar_errors, tafs, taf_errors
+    try:
+        metars, metar_errors = client.metars(list(codes))
+    except (ConnectionError, PermissionError, LookupError, RuntimeError, ValueError) as exc:
+        metars = []
+        metar_errors = {code: str(exc) for code in codes}
+    fetched_at = datetime.now(timezone.utc)
+    try:
+        tafs, taf_errors = client.tafs(list(codes))
+    except (ConnectionError, PermissionError, LookupError, RuntimeError, ValueError) as exc:
+        tafs = []
+        taf_errors = {code: str(exc) for code in codes}
+    return metars, metar_errors, tafs, taf_errors, fetched_at
 
 
 def _read_codes() -> dict[str, str] | None:
@@ -109,10 +121,26 @@ def render() -> None:
         return
 
     try:
-        metars, metar_errors, tafs, taf_errors = _fetch_reports(tuple(dict.fromkeys(codes.values())))
+        metars, metar_errors, tafs, taf_errors, fetched_at = _fetch_reports(
+            tuple(dict.fromkeys(codes.values()))
+        )
     except (ConnectionError, PermissionError, LookupError, RuntimeError) as exc:
         st.error(str(exc))
         return
+
+    metar_store = MetarStore()
+    storage_errors = []
+    saved_count = 0
+    for metar in metars:
+        try:
+            if metar_store.append_if_new(metar, fetched_at):
+                saved_count += 1
+        except (OSError, ValueError) as exc:
+            storage_errors.append(f"{metar.icao}: {exc}")
+    if saved_count:
+        st.caption(f"Saved {saved_count} new METAR observation(s) to the project history.")
+    for message in storage_errors:
+        st.error(f"Could not save METAR history for {message}")
 
     if metars:
         _show_summary(metars)

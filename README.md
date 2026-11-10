@@ -29,6 +29,18 @@ streamlit run app.py
 
 On **Live Conditions**, add locations and fetch current conditions. Successful fetches are appended to `data/weather_history.csv`. The **Analytics** view uses those recorded observations, so charts become more useful as the app is used over time. The CSV contains real fetched data and can be committed when the group has collected its observations.
 
+## Collect project history
+
+The project plan uses a fixed collection set: Madrid, London, and Paris, plus the LEMD, EGLL, and LFPG airport METARs. Run the collector from the project root at least twice a day until submission:
+
+```bash
+python scripts/log_weather.py
+```
+
+Each run appends successful observations to `data/weather_history.csv` and `data/metar_history.csv`. A failed location is reported while the other locations continue. Commit both CSV files regularly so the submitted repository contains real history across multiple days. Do not add sample or manually invented weather rows.
+
+The **Airport weather** page also saves successful METAR fetches through the same `MetarStore`. Cached Streamlit reruns reuse the fetch timestamp, so they do not add the same cached fetch to the log again. TAFs are displayed but are not included in the METAR history.
+
 ## Project structure
 
 - `src/weather_app/client.py`: generic JSON API client (`APIClient`) and one subclass per provider: OpenWeatherMap (`WeatherClient`) and aviationweather.gov (`AviationWeatherClient`, free, no key)
