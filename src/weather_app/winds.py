@@ -101,3 +101,126 @@ def wind_levels_from_api(payload: dict[str, Any]) -> list[WindLevel]:
             continue
         levels.append(WindLevel(hpa, float(speed), float(direction), float(temperature)))
     return sorted(levels)
+
+
+# ---------------------------------------------------------------- along a route ----
+
+def bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Initial great-circle direction from point 1 to point 2, in degrees (0 = north, 90 = east)."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    d_lambda = math.radians(lon2 - lon1)
+    x = math.sin(d_lambda) * math.cos(phi2)
+    y = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(d_lambda)
+    return math.degrees(math.atan2(x, y)) % 360
+
+
+def tracks_along(points: list[tuple[float, float]]) -> list[float]:
+    """Direction of flight at each point of a route.
+
+    A great circle changes direction as it goes (Madrid–London turns from about 10° to 12°;
+    long routes turn much more), so each point uses the direction towards the next point; the last point
+    keeps the direction it arrived with.
+    """
+    if len(points) < 2:
+        raise ValueError("A route needs at least 2 points.")
+    tracks = [bearing_deg(*a, *b) for a, b in zip(points, points[1:])]
+    tracks.append(bearing_deg(*points[-2], *points[-1]) if len(points) == 2 else tracks[-1])
+    return tracks
+
+
+class RouteWinds:
+    """Model winds at every cruise height, sampled at evenly spaced points along a route.
+
+    `levels_per_point[i]` is the list of WindLevel objects above `points[i]`. A height that
+    the model did not report at some point is simply averaged over the points that have it.
+    """
+
+    def __init__(self, route_name: str, distance_nm: float, points: list[tuple[float, float]],
+                 levels_per_point: list[list[WindLevel]]) -> None:
+        if len(points) != len(levels_per_point):
+            raise ValueError("Need one list of wind levels per route point.")
+        self.route_name = route_name
+        self.distance_nm = distance_nm
+        self.points = points
+        self.levels_per_point = levels_per_point
+        self._tracks = tracks_along(points)
+
+    @property
+    def distances_nm(self) -> list[float]:
+        """Distance of each sample point from departure."""
+        step = self.distance_nm / (len(self.points) - 1)
+        return [round(i * step) for i in range(len(self.points))]
+
+    @property
+    def flight_levels(self) -> list[int]:
+        """Flight levels reported at one or more points, lowest first."""
+        return sorted({lvl.flight_level for levels in self.levels_per_point for lvl in levels})
+
+    def headwinds_at(self, flight_level: int) -> list[float | None]:
+        """Headwind (+) or tailwind (−) in kt at each point for one height (None = not reported)."""
+        result: list[float | None] = []
+        for levels, track in zip(self.levels_per_point, self._tracks):
+            match = next((lvl for lvl in levels if lvl.flight_level == flight_level), None)
+            result.append(None if match is None else match.headwind_kt(track))
+        return result
+
+    def average_headwind_kt(self, flight_level: int) -> float:
+        """Mean headwind along the route at one height. Negative = tailwind on average."""
+        values = [v for v in self.headwinds_at(flight_level) if v is not None]
+        if not values:
+            raise LookupError(f"No wind data for FL{flight_level:03d} on this route.")
+        return round(sum(values) / len(values), 1)
+
+    @property
+    def best_flight_level(self) -> int:
+        """The height with the least headwind (or strongest tailwind) on average."""
+        if not self.flight_levels:
+            raise LookupError("No wind data on this route.")
+        return min(self.flight_levels, key=self.average_headwind_kt)
+
+    def summary_rows(self) -> list[dict[str, Any]]:
+        """One row per height, for a table: averages along the route."""
+        rows = []
+        for fl in self.flight_levels:
+            found = [lvl for levels in self.levels_per_point for lvl in levels if lvl.flight_level == fl]
+            headwind = self.average_headwind_kt(fl)
+            rows.append({
+                "flight_level": fl,
+                "altitude_ft": found[0].altitude_ft,
+                "altitude_m": found[0].altitude_m,
+                "wind_speed_kt": round(sum(lvl.wind_speed_kt for lvl in found) / len(found)),
+                "temperature_c": round(sum(lvl.temperature_c for lvl in found) / len(found)),
+                "headwind_kt": headwind,
+                "headwind_kmh": round(headwind * KMH_PER_KT),
+            })
+        return rows
+
+    def __str__(self) -> str:
+        best = self.best_flight_level
+        return f"Winds aloft {self.route_name}: best FL{best:03d} (average headwind {self.average_headwind_kt(best):+.0f} kt)"
+
+    def __repr__(self) -> str:
+        return f"RouteWinds({self.route_name!r}, {len(self.points)} points, levels={self.flight_levels})"
+
+
+def best_level_hint(route_winds: RouteWinds) -> str:
+    """Plain-language hint, e.g. 'FL340 has the strongest tailwind on this route (+45 kt).'"""
+    best = route_winds.best_flight_level
+    value = route_winds.average_headwind_kt(best)
+    if value < 0:
+        return f"FL{best:03d} has the strongest tailwind on this route (+{-value:.0f} kt behind you)."
+    if value == 0:
+        return f"FL{best:03d} has no average headwind or tailwind on this route."
+    return f"Every height has a headwind on this route; FL{best:03d} has the weakest ({value:.0f} kt)."
+
+
+def average_headwind_kt(route: Any, flight_level: int, point_count: int = 8) -> float:
+    """Hand-off for the Fuel planner: mean headwind (kt, negative = tailwind) at one cruise
+    height along a weather_app.route.Route, from live Open-Meteo data.
+
+    Raises the same errors as the API client (ConnectionError, RuntimeError, ...) if
+    Open-Meteo cannot be reached, and LookupError if that height has no data.
+    """
+    from .client import OpenMeteoClient  # imported here: client.py already imports this module
+
+    return OpenMeteoClient().route_winds(route, point_count).average_headwind_kt(flight_level)

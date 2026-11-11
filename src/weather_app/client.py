@@ -14,7 +14,7 @@ import requests
 
 from .models import LocationSnapshot, snapshot_from_api
 from .reports import MetarReport, TafReport, clean_icao_code, metar_from_api, taf_from_api
-from .winds import FLIGHT_LEVELS, WindLevel, wind_levels_from_api
+from .winds import FLIGHT_LEVELS, RouteWinds, WindLevel, wind_levels_from_api
 
 
 class APIClient:
@@ -198,8 +198,18 @@ class OpenMeteoClient(APIClient):
 
     def winds_at(self, latitude: float, longitude: float) -> list[WindLevel]:
         """Current model wind and temperature at each cruise height above one point, lowest first."""
-        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
-            raise ValueError("Coordinates out of range (latitude −90 to 90, longitude −180 to 180).")
+        return self.winds_many([(latitude, longitude)])[0]
+
+    def winds_many(self, points: list[tuple[float, float]]) -> list[list[WindLevel]]:
+        """Winds at every cruise height above several points, in ONE request.
+
+        Returns one list of WindLevel objects per point, in the same order as `points`.
+        """
+        if not points:
+            raise ValueError("Give at least one point.")
+        for latitude, longitude in points:
+            if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+                raise ValueError("Coordinates out of range (latitude −90 to 90, longitude −180 to 180).")
         variables = [
             f"{name}_{hpa}hPa"
             for hpa in FLIGHT_LEVELS
@@ -208,11 +218,20 @@ class OpenMeteoClient(APIClient):
         payload = self._get(
             "forecast",
             {
-                "latitude": latitude,
-                "longitude": longitude,
+                "latitude": ",".join(f"{lat:.3f}" for lat, _ in points),
+                "longitude": ",".join(f"{lon:.3f}" for _, lon in points),
                 "current": ",".join(variables),
                 "wind_speed_unit": "kn",
                 "timezone": "GMT",
             },
         )
-        return wind_levels_from_api(payload)
+        # Open-Meteo answers with one object for one point, and a list for several.
+        answers = payload if isinstance(payload, list) else [payload]
+        if len(answers) != len(points):
+            raise RuntimeError("Open-Meteo returned a different number of points than requested.")
+        return [wind_levels_from_api(answer) for answer in answers]
+
+    def route_winds(self, route: Any, point_count: int = 8) -> RouteWinds:
+        """Winds at every cruise height at `point_count` evenly spaced points along a Route."""
+        points = route.points(point_count)
+        return RouteWinds(str(route), route.distance_nm, points, self.winds_many(points))

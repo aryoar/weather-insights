@@ -117,3 +117,20 @@ and five Python tests.
 project, configured the API key locally, and tested the
 functionality in Streamlit. Shared-route integration
 remains to be coordinated with the team.
+---
+
+## Feature: Winds aloft page (headwind per cruise height along the route)
+
+**Asked (Claude Code, Opus 5.5):** After the route overview (`route.py`) was merged: build the Winds aloft page from the team plan. For the chosen route, show wind and temperature at several cruise heights along the route, the headwind or tailwind at each height, a "best height" hint and a labelled chart, and expose `average_headwind_kt(route, level)` for the Fuel planner.
+
+**Got:**
+- `winds.py`: `bearing_deg()` (great-circle direction), `tracks_along()` (direction of flight at each route point, since a great circle turns as it goes), and a `RouteWinds` class. It has properties `distances_nm`, `flight_levels` and `best_flight_level`, methods `headwinds_at(fl)`, `average_headwind_kt(fl)` and `summary_rows()`, and `__str__` / `__repr__`. A height missing at one point is averaged over the points that have it, never filled in. Also added `best_level_hint()` and the Fuel planner hand-off `average_headwind_kt(route, flight_level, point_count=8)`.
+- `client.py`: `OpenMeteoClient.winds_many(points)` fetches all route points in **one** request (Open-Meteo returns a list for several coordinates). `winds_at()` now reuses it. `route_winds(route, n)` returns a `RouteWinds`.
+- `views/winds_aloft.py`: a form with departure, destination and number of points. It defaults to the route chosen on the other pages, and validates codes before any call. It shows the best-height hint, metrics (distance in nm and km, best height), a Plotly heatmap (height × distance, red = headwind, blue = tailwind), a bar chart of the average headwind per height, a table in kt and km/h and in ft and m, the formula in a caption, a "why wind matters" expander and the glossary. Both API calls are cached with `@st.cache_data(ttl=300)`.
+- `glossary.py`: "Flight level (FL)", "Headwind / tailwind", "Winds aloft", "Pressure level (hPa)".
+- `pyproject.toml`: added `plotly`.
+- `tests/test_winds.py`: bearings (north 0°, east 90°, south 180°), the track at each point, a hand-made equator route where FL300 has +40 kt and FL340 has −40 kt (best = FL340, with the exact hint text), and a height missing at one point.
+
+**Checked:** `pytest`: 19 passed, in a fresh `uv` virtual environment with `pip install -e .`. Live: LEMD→EGLL (673 nm) gives a tailwind at every height, strongest at FL340 (about 37 kt). That makes sense for a north-north-east route under a westerly jet. KJFK→EGLL (2,991 nm) gives a tailwind at the higher levels. Ran the page with Streamlit `AppTest`: no exceptions. Both routes show the hint, 3 metrics, 2 charts and the table. `MAD`, `ZZZZ` and the same airport twice each show their own error. A simulated Open-Meteo outage shows "Winds aloft are not available right now: Could not reach Open-Meteo…" instead of crashing. The charts were not inspected visually, because the browser preview could not start the app from this folder.
+
+**Kept / changed:** Kept. The direction-of-flight helpers went into `winds.py` rather than editing Teammate 3's `route.py`. This page does not write to `data/*.csv` (house rule: only the logger changes the logs).
