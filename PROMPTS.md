@@ -95,3 +95,25 @@ Keep this running as you go — don't reconstruct it from memory at the end.
 **Checked:** `pytest` passes (8 tests). One of my own tests was too strict at first, so I relaxed it to the documented accuracy of the sampled distance (about 3 nm). I ran the whole app with Streamlit `AppTest` against live aviationweather.gov data. LEMD→EGLL gives 673 nm, 16 airports near the route and EGSS as the closest good alternate. KJFK→EGLL gives 2,991 nm and 43 airports. `mad`, the same airport twice and `ZZZZ` each show their own error message. With no OpenWeatherMap key, the page shows a warning and the rest still works. There was no real key on this machine, so the weather-dot and chart code was run with a stand-in OpenWeatherMap response. That code path has **not** been checked against live OpenWeatherMap yet. The AppTest run found a real bug: the form inputs used `value=` defaults that change after each submit, so Streamlit recreated the widgets and ignored a new entry. Stable widget `key`s fixed it.
 
 **Decision:** route weather points are **not** added to `weather_history.csv`. They are named after distances or nearby places, so they would fill the city-based Analytics page with one-off locations.
+
+## Airport Suitability
+
+**Asked:** Help develop the Airport Suitability page using
+real METAR data, runway headings, crosswind calculations,
+sunrise/sunset information and hypothetical scenarios.
+
+**Got:** Airport calculation functions in airports.py,
+a Streamlit suitability page, a runway data downloader
+and five Python tests.
+
+**Checked:**
+- All 5 pytest tests passed.
+- Downloaded 8 runway records for 3 airports.
+- Verified Madrid, Heathrow and Gatwick results.
+- Tested the maintenance closure scenario.
+- Confirmed sunrise/sunset data works using OpenWeatherMap.
+
+**Kept/changed:** Integrated the files into our existing
+project, configured the API key locally, and tested the
+functionality in Streamlit. Shared-route integration
+remains to be coordinated with the team.
