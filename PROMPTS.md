@@ -96,6 +96,27 @@ Keep this running as you go — don't reconstruct it from memory at the end.
 
 **Decision:** route weather points are **not** added to `weather_history.csv`. They are named after distances or nearby places, so they would fill the city-based Analytics page with one-off locations.
 
+## Airport Suitability
+
+**Asked:** Help develop the Airport Suitability page using
+real METAR data, runway headings, crosswind calculations,
+sunrise/sunset information and hypothetical scenarios.
+
+**Got:** Airport calculation functions in airports.py,
+a Streamlit suitability page, a runway data downloader
+and five Python tests.
+
+**Checked:**
+- All 5 pytest tests passed.
+- Downloaded 8 runway records for 3 airports.
+- Verified Madrid, Heathrow and Gatwick results.
+- Tested the maintenance closure scenario.
+- Confirmed sunrise/sunset data works using OpenWeatherMap.
+
+**Kept/changed:** Integrated the files into our existing
+project, configured the API key locally, and tested the
+functionality in Streamlit. Shared-route integration
+remains to be coordinated with the team.
 ---
 
 ## Feature: Winds aloft page (headwind per cruise height along the route)
