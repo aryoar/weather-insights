@@ -175,3 +175,17 @@ remains to be coordinated with the team.
   the new chart compares only FL300–FL390 for the jet (+55 kg at FL300, −56 kg at FL390).
 - Kept the stated simplifications (same burn across the cruise range, still air to the alternate)
   because the page explains them and the planner is for learning only.
+
+---
+
+## Feature: Live Conditions and historical analytics pages
+
+**Asked:** Move Live Conditions and Analytics out of `app.py`, then add a city trend, weekly airport IFR/LIFR comparison, daily temperature range, and feels-like difference with filters that adapt to recorded history.
+
+**Got:** Added `views/live_conditions.py` and `views/analytics.py`; `app.py` now handles the shared page shell, navigation, and dispatch. Added `MetarStore.load()` and analytics for daily city temperature ranges and airport IFR/LIFR shares. Analytics uses Madrid-local date filters, Plotly charts with units and sample counts, logger-set defaults when available, and empty/low-sample messages. Daily range is withheld for a city-day with fewer than two observations.
+
+**Checked:** 47 tests passed across analytics, route, winds, airports, and fuel. `compileall` and `git diff --check` passed. Streamlit `AppTest` ran Analytics (four charts from current history, no exceptions) and Live Conditions (no exceptions). Current history has 32 city observations and 28 METAR rows; coverage varies by city and airport, so some date selections have no daily range and airport shares may have small denominators.
+
+**Revision:** Replaced the IFR/LIFR share ranking with airport flight-category mix, wind/gust history, exact visibility history, and a per-airport summary table. Consolidated city and METAR date filters into one shared range. Expanded weather trends to two charts and two summary metrics; daily metrics now show three scorecards, two charts, and a detail table. Empty or cleared city/airport selections fall back to all available choices, and incomplete date selections are normalized safely.
+
+**Checked:** `pytest -q` passed (47 tests). Compilation passed. Streamlit `AppTest` rendered seven charts, two tables and five metrics from the current logs with no exceptions. A single-day filter and cleared city/airport filters also rendered without exceptions. The current logs contain 35 city observations and 31 METAR rows; exact visibility values marked as 9999-or-greater are omitted from the visibility trend.
