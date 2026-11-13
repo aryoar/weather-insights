@@ -1,0 +1,21 @@
+{
+  "icaoId": "LEMD",
+  "name": "Madrid/Barajas Arpt, M, ES",
+  "obsTime": 1794564000,
+  "rawOb": "METAR LEMD 131000Z 20009G24KT 120V240 9999 SCT019 SCT025 14/11 Q1011 NOSIG",
+  "fltCat": "VFR",
+  "temp": 14,
+  "dewp": 11,
+  "wdir": 200,
+  "wspd": 9,
+  "wgst": 24,
+  "visib": "6+",
+  "altim": 1011,
+  "wxString": null,
+  "clouds": [
+    {"cover": "SCT", "base": 1900},
+    {"cover": "SCT", "base": 2500}
+  ],
+  "lat": 40.466,
+  "lon": -3.555
+}

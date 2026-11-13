@@ -7,6 +7,8 @@ from weather_app.analytics import (
     airport_ifr_lifr_share,
     comfort_ranking,
     daily_temperature_ranges,
+    deduplicate_metar_observations,
+    deduplicate_weather_observations,
     latest_comparison,
     temperature_trend,
 )
@@ -113,3 +115,39 @@ def test_airport_ifr_lifr_share_handles_invalid_range_and_empty_data():
     day = pd.Timestamp("2026-11-13").date()
     assert airport_ifr_lifr_share(empty, day, day).empty
     assert airport_ifr_lifr_share(HISTORY, day, day - pd.Timedelta(days=1)).empty
+
+
+def test_weather_analytics_drops_matching_payloads_fetched_within_two_minutes():
+    history = pd.DataFrame([
+        {"observed_at": "2026-11-13T09:15:42Z", "city": "London", "country": "GB",
+         "temperature_c": 6.22, "feels_like_c": 3.59, "humidity_pct": 94,
+         "wind_speed_mps": 3.6, "description": "Mist"},
+        {"observed_at": "2026-11-13T09:16:01Z", "city": "London", "country": "GB",
+         "temperature_c": 6.22, "feels_like_c": 3.59, "humidity_pct": 94,
+         "wind_speed_mps": 3.6, "description": "Mist"},
+        {"observed_at": "2026-11-13T09:30:00Z", "city": "London", "country": "GB",
+         "temperature_c": 6.22, "feels_like_c": 3.59, "humidity_pct": 94,
+         "wind_speed_mps": 3.6, "description": "Mist"},
+    ])
+    unique = deduplicate_weather_observations(history)
+    assert len(unique) == 2
+    assert unique["observed_at"].tolist() == [
+        pd.Timestamp("2026-11-13T09:15:42Z"),
+        pd.Timestamp("2026-11-13T09:30:00Z"),
+    ]
+
+
+def test_metar_analytics_keeps_latest_fetch_per_airport_observation():
+    history = pd.DataFrame([
+        {"icao": "lemd", "observed_at": "2026-11-13T10:00:00Z",
+         "fetched_at": "2026-11-13T10:02:00Z", "flight_category": "VFR"},
+        {"icao": "LEMD", "observed_at": "2026-11-13T10:00:00+00:00",
+         "fetched_at": "2026-11-13T10:22:00Z", "flight_category": "MVFR"},
+        {"icao": "LEMD", "observed_at": "2026-11-13T10:30:00Z",
+         "fetched_at": "2026-11-13T10:32:00Z", "flight_category": "VFR"},
+    ])
+    unique = deduplicate_metar_observations(history)
+    assert len(unique) == 2
+    assert unique.iloc[0]["icao"] == "LEMD"
+    assert unique.iloc[0]["flight_category"] == "MVFR"
+    assert unique.iloc[0]["fetched_at"] == pd.Timestamp("2026-11-13T10:22:00Z")

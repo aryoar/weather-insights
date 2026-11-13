@@ -16,7 +16,7 @@ dependencies = [
     "plotly",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = ["pytest"]
 
 [tool.setuptools.packages.find]

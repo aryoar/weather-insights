@@ -6,6 +6,7 @@ successful OpenWeatherMap city observations and METAR reports to their CSV logs.
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -58,11 +59,12 @@ def _collect_metars() -> tuple[int, list[str]]:
         return 0, [f"aviationweather.gov: {exc}"]
 
     store = MetarStore()
+    fetched_at = datetime.now(timezone.utc)
     saved = 0
     for report in reports:
         try:
-            store.append(report)
-            saved += 1
+            if store.append_if_new(report, fetched_at):
+                saved += 1
         except (OSError, ValueError) as exc:
             errors[report.icao] = f"Fetched but could not save: {exc}"
     return saved, [f"METAR {code}: {message}" for code, message in errors.items()]
