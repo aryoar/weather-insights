@@ -6,7 +6,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from weather_app.analytics import LOCAL_TIMEZONE, daily_temperature_ranges
+from weather_app.analytics import (
+    LOCAL_TIMEZONE,
+    daily_temperature_ranges,
+    deduplicate_metar_observations,
+    deduplicate_weather_observations,
+)
 from weather_app.storage import MetarStore, WeatherStore
 
 DEFAULT_CITIES = ("Madrid", "London", "Paris")
@@ -281,12 +286,12 @@ def render() -> None:
     st.caption("Charts use recorded observations only. Dates are filtered in Madrid local time; chart timestamps use UTC.")
 
     try:
-        weather = WeatherStore().load()
+        weather = deduplicate_weather_observations(WeatherStore().load())
     except (OSError, ValueError) as exc:
         weather = pd.DataFrame()
         st.error(f"Could not read city weather history: {exc}")
     try:
-        metars = MetarStore().load()
+        metars = deduplicate_metar_observations(MetarStore().load())
     except (OSError, ValueError) as exc:
         metars = pd.DataFrame()
         st.error(f"Could not read airport METAR history: {exc}")

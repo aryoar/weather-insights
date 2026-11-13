@@ -189,3 +189,13 @@ remains to be coordinated with the team.
 **Revision:** Replaced the IFR/LIFR share ranking with airport flight-category mix, wind/gust history, exact visibility history, and a per-airport summary table. Consolidated city and METAR date filters into one shared range. Expanded weather trends to two charts and two summary metrics; daily metrics now show three scorecards, two charts, and a detail table. Empty or cleared city/airport selections fall back to all available choices, and incomplete date selections are normalized safely.
 
 **Checked:** `pytest -q` passed (47 tests). Compilation passed. Streamlit `AppTest` rendered seven charts, two tables and five metrics from the current logs with no exceptions. A single-day filter and cleared city/airport filters also rendered without exceptions. The current logs contain 35 city observations and 31 METAR rows; exact visibility values marked as 9999-or-greater are omitted from the visibility trend.
+
+---
+
+## Feature: observation de-duplication and reproducible setup
+
+**Asked:** Finish the remaining logging, analytics, test, and packaging tasks from the team plan.
+
+**Got:** `MetarStore.append_if_new()` now keys duplicate detection on normalized airport code plus observation timestamp, and the scheduled logger uses that method. Weather analytics collapses identical payloads fetched within two minutes; historical METAR analytics keeps the latest fetched row for each airport observation. Added temporary-directory round-trip tests for both stores, a saved METAR JSON fixture and parser test, and deduplication tests. Moved pytest into the default `dev` dependency group, generated `uv.lock`, and updated README setup, test, and collection commands to use `uv`.
+
+**Checked:** `pytest -q`: 52 passed. `compileall` and targeted `git diff --check` passed. Parsed `uv.lock` as TOML and verified it locks Plotly as a runtime dependency and pytest in the dev group. Streamlit `AppTest` rendered Analytics with seven charts, two tables, and six metrics without exceptions. Historical CSVs were left unchanged; duplicate observations already in them are de-duplicated for analytics.

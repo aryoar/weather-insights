@@ -93,12 +93,9 @@ class MetarStore:
         self.path = Path(path)
 
     def append_if_new(self, report, fetched_at: datetime) -> bool:
-        """Append once per actual fetch, even when Streamlit reruns on cached data.
-
-        The fetch timestamp is part of the cache result. A Streamlit rerun reuses
-        that timestamp, while a later API request gets a new one.
-        """
-        fetched_at_text = fetched_at.isoformat()
+        """Append only once per airport observation, even when fetched again later."""
+        report_icao = str(report.icao).strip().upper()
+        report_observed_at = pd.to_datetime(report.observed_at, utc=True, errors="coerce")
         if self.path.exists() and self.path.stat().st_size > 0:
             with self.path.open(newline="", encoding="utf-8") as file:
                 reader = csv.DictReader(file)
@@ -106,11 +103,14 @@ class MetarStore:
                     raise ValueError(
                         f"{self.path.name} has an unexpected column layout; refusing to mix METAR data formats."
                     )
-                if any(
-                    row.get("icao") == report.icao and row.get("fetched_at") == fetched_at_text
-                    for row in reader
-                ):
-                    return False
+                for row in reader:
+                    row_observed_at = pd.to_datetime(row.get("observed_at"), utc=True, errors="coerce")
+                    if (
+                        str(row.get("icao", "")).strip().upper() == report_icao
+                        and pd.notna(row_observed_at)
+                        and row_observed_at == report_observed_at
+                    ):
+                        return False
         self.append(report, fetched_at=fetched_at)
         return True
 
