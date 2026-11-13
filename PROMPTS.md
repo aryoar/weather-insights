@@ -134,3 +134,44 @@ remains to be coordinated with the team.
 **Checked:** `pytest`: 19 passed, in a fresh `uv` virtual environment with `pip install -e .`. Live: LEMD→EGLL (673 nm) gives a tailwind at every height, strongest at FL340 (about 37 kt). That makes sense for a north-north-east route under a westerly jet. KJFK→EGLL (2,991 nm) gives a tailwind at the higher levels. Ran the page with Streamlit `AppTest`: no exceptions. Both routes show the hint, 3 metrics, 2 charts and the table. `MAD`, `ZZZZ` and the same airport twice each show their own error. A simulated Open-Meteo outage shows "Winds aloft are not available right now: Could not reach Open-Meteo…" instead of crashing. The charts were not inspected visually, because the browser preview could not start the app from this folder.
 
 **Kept / changed:** Kept. The direction-of-flight helpers went into `winds.py` rather than editing Teammate 3's `route.py`. This page does not write to `data/*.csv` (house rule: only the logger changes the logs).
+
+---
+
+## Feature: Fuel planner page (`FuelPlan`) and real analytics tests
+
+**Asked (Claude Code, Opus 5.5):** First, "check the repo against the capstone rubric" (README and summary pasted as context). The agent listed the gaps: no commits from me yet, the Fuel planner page still a placeholder with no owner, and `tests/test_analytics.py` still the `1 + 1 == 2` example. I asked it to build the Fuel planner as my feature, following the plan in the placeholder's docstring, and to replace the placeholder test with real checks of the analytics.
+
+**Got:**
+- `src/weather_app/fuel.py` (new): a frozen `AircraftProfile` dataclass and three made-up aircraft classes with round numbers (regional turboprop, narrow-body jet, wide-body jet). They are not real models. `payload_kg()` uses standard masses (84 kg per passenger, 15 kg per bag). The `FuelPlan` class has one `@property` per fuel part: taxi, trip, contingency (5%), alternate, final reserve (30 min) and block fuel. It also has properties for ground speed, trip time, hourly burn (more payload means more burn) and `problems` (payload over the limit, tanks too small). `with_headwind()` returns the same flight at another headwind. It defines `__str__`, `__repr__` and `__lt__`, so `sorted(plans)` puts the plan needing the least fuel first. Bad inputs raise `ValueError`: zero distance, negative load, more passengers than seats, or a headwind faster than the aircraft.
+- `views/fuel_planner.py`: a form with departure, destination and alternate (ICAO codes, checked before any API call), cruise height, aircraft class, passengers, bags, cargo and extra fuel. Real data: airport positions from METARs, the great-circle distance, and the average headwind at the chosen height from Open-Meteo (one cached request, same data as Winds aloft). The hypothetical aircraft and load are shown in a SCENARIO banner. The page shows 4 metrics and 2 Plotly charts: the fuel breakdown in kg, and block fuel at each cruise height with today's winds. It also has a "how each part is worked out" table and the glossary.
+- `glossary.py`: added Block fuel, Trip fuel, Contingency fuel, Final reserve, Payload and Ground speed.
+- `tests/test_fuel.py` (new): known answers with a test aircraft (400 kt, 2,000 kg/h, 200 kg taxi). 800 nm in still air gives 2 h, 4,000 kg trip fuel and 6,400 kg block fuel. A 100 kt headwind over 600 nm gives 300 kt and 4,000 kg; the same flight with a tailwind gives 2,400 kg. Also covers payload burn, extra fuel, the `problems` messages and six invalid inputs.
+- `tests/test_analytics.py`: replaced the placeholder with real tests on a small hand-made history. The trend comes back in time order even when rows are out of order. The latest-row comparison and the feels-like difference are checked. Comfort scores are worked out by hand (Madrid 19, London 1). One case checks that the comfort ranking can differ from the temperature ranking. Empty history is also tested.
+- `README.md`: the project structure now lists `route.py`, `winds.py`, `airports.py` and `fuel.py`.
+
+**Checked:** `pytest`: 42 passed, in a fresh virtual environment with `pip install -e .`. Ran the page with Streamlit `AppTest` on live data. LEMD→EGLL with a narrow-body jet at FL340: no exceptions, 670 nm, 1 h 30 min, 6,791 kg block fuel, both charts and the table shown. LEMD→KJFK with a turboprop: it shows the "tanks too small" error instead of crashing. Using the same airport twice, the invalid code `MAD` and the unknown code `ZZZZ` each show their own message. Running the page found one display bug (the flight time could show "1 h 60 min"), which was fixed. The charts were not inspected visually in a browser.
+
+**Follow-up after I looked at the page in the browser (same session):** I pointed out two problems and asked the agent to fix them.
+- The "block fuel at each cruise height" bars started at 6,700 kg instead of 0, so a 110 kg difference (under 2%) looked like half the bar. The chart now shows each height as "kg more or less than your chosen height", as bars from zero: red means more fuel, green means less, and each bar is labelled (e.g. "+53 kg", "−57 kg").
+- The metrics showed ↑ arrows next to plain information ("↑ 673 nm", "↑ ≈ 8,500 litres") because they used Streamlit's `delta`, which reads like an increase. Added `metric_with_note()` in `views/common.py`, which shows the extra information as a grey caption under the metric with no arrow. Used it on the Fuel planner and the Winds aloft page (Jeevan's page had the same issue on its Distance and Best height metrics). A wind under 0.5 kt now reads "no headwind or tailwind" instead of "0 kt headwind".
+- Checked again with `AppTest`: no exceptions on either page, no metric has a delta, and the chart labels for LEMD→EGLL were −18, +19, +51, +53 and −57 kg compared with FL340. `pytest`: 42 passed.
+
+**Second follow-up (asked the agent for anything else to improve before committing):**
+- Each aircraft class now has a cruise range (`min_flight_level` / `max_flight_level`, `can_cruise_at()`, and a `cruise_range` property): turboprop FL100–FL180, jets FL300–FL390. Before, the page let a turboprop fly at FL390 and could tell a jet to cruise at FL050, because the burn per hour is the same at every height. Now a height outside the range gives a clear error, the range is shown next to each aircraft name, and the best-height chart and hint only compare heights in that range.
+- Renamed the function `payload_kg()` to `total_payload_kg()`. It had the same name as the `FuelPlan.payload_kg` property that calls it, which worked but was confusing to explain.
+- `pyproject.toml`: added `pytest` as an optional `dev` dependency. `README.md` now has a "Run the tests" section and explains the `ModuleNotFoundError` I hit when I started the app with Anaconda's Python instead of `.venv`.
+- Checked: `pytest` 44 passed (new tests for the cruise range). With `AppTest`, a turboprop at FL340 shows the range error, a turboprop at FL180 compares FL100 and FL180 only, and the default jet compares FL300, FL340 and FL390 (+55, your choice, −56 kg). One run hit a real aviationweather.gov timeout; the page showed "took too long to answer" instead of crashing.
+
+**Known simplifications:** fuel burn per hour is the same at every height, so the "best height" hint compares winds only (the page says so). The alternate leg uses still air, because we have no wind data for that leg. The aircraft numbers are rounded for teaching.
+
+**Kept / changed:** Kept, with the follow-up fixes above. Checks I did myself:
+- Ran the page in the browser with the default LEMD→EGLL flight (narrow-body jet, FL340, 150 passengers,
+  100 bags, 1,000 kg cargo): 673 nm, 450 kt ground speed with no headwind or tailwind, 1 h 30 min.
+- Checked the numbers on a calculator: payload 150 × 84 + 100 × 15 + 1,000 = 15,100 kg; burn
+  2,200 + 30 × 15.1 = 2,653 kg/h; trip 673 ÷ 450 ≈ 1.5 h × 2,653 ≈ 3,970 kg; contingency 5% = 199 kg;
+  final reserve 0.5 × 2,653 = 1,326 kg; alternate 1,104 kg. Taxi 200 + 3,970 + 199 + 1,104 + 1,326
+  = 6,799 kg, the block fuel shown (≈ 8,499 litres at 0.8 kg/L).
+- Spotted the misleading chart axis and the ↑ arrows in the browser and asked for the fixes; checked
+  the new chart compares only FL300–FL390 for the jet (+55 kg at FL300, −56 kg at FL390).
+- Kept the stated simplifications (same burn across the cruise range, still air to the alternate)
+  because the page explains them and the planner is for learning only.

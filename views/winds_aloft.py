@@ -20,7 +20,7 @@ from weather_app.reports import clean_icao_code
 from weather_app.route import KM_PER_NM, Route
 from weather_app.winds import RouteWinds, best_level_hint
 
-from .common import show_glossary
+from .common import metric_with_note, show_glossary
 
 API_ERRORS = (ConnectionError, PermissionError, LookupError, RuntimeError, ValueError)
 
@@ -184,10 +184,11 @@ def render() -> None:
     st.success(f"✈️ {best_level_hint(winds)}")
     c1, c2, c3 = st.columns(3)
     c1.metric("Route", f"{dep_code} → {dest_code}")
-    c2.metric("Distance", f"{route.distance_nm:,.0f} nm", f"{route.distance_nm * KM_PER_NM:,.0f} km",
-              delta_color="off", help=GLOSSARY["Nautical mile (nm)"])
-    c3.metric(f"Best height: FL{best:03d}", f"{abs(best_value):.0f} kt {'tailwind' if best_value < 0 else 'headwind'}",
-              f"{abs(best_value) * 1.852:.0f} km/h", delta_color="off", help=GLOSSARY["Flight level (FL)"])
+    metric_with_note(c2, "Distance", f"{route.distance_nm:,.0f} nm", f"{route.distance_nm * KM_PER_NM:,.0f} km",
+                     help=GLOSSARY["Nautical mile (nm)"])
+    metric_with_note(c3, f"Best height: FL{best:03d}",
+                     f"{abs(best_value):.0f} kt {'tailwind' if best_value < 0 else 'headwind'}",
+                     f"{abs(best_value) * 1.852:.0f} km/h", help=GLOSSARY["Flight level (FL)"])
 
     # 4. Charts
     table = pd.DataFrame(winds.summary_rows())

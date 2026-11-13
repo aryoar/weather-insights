@@ -27,7 +27,20 @@ Do not commit `variables.env`. The app reads the key from the environment and ne
 streamlit run app.py
 ```
 
+Run it from the activated virtual environment (`source .venv/bin/activate`). If you see
+`ModuleNotFoundError: No module named 'weather_app'`, the app was started with a Python where
+the project is not installed: activate `.venv` and run `python -m pip install -e .` again.
+
 On **Live Conditions**, add locations and fetch current conditions. Successful fetches are appended to `data/weather_history.csv`. The **Analytics** view uses those recorded observations, so charts become more useful as the app is used over time. The CSV contains real fetched data and can be committed when the group has collected its observations.
+
+## Run the tests
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
+The tests use small hand-made inputs with known answers and need no API key or network.
 
 ## Collect project history
 
@@ -49,6 +62,9 @@ The **Airport weather** page also saves successful METAR fetches through the sam
 - `src/weather_app/glossary.py`: plain-language explanations of aviation terms, used as tooltips
 - `src/weather_app/storage.py`: append-only CSV history
 - `src/weather_app/analytics.py`: trend, comparison, and ranking calculations
+- `src/weather_app/route.py` and `winds.py`: great-circle route geometry, and winds aloft with the headwind along a route
+- `src/weather_app/airports.py`: educational airport suitability checks (runway crosswind, daylight, flight category)
+- `src/weather_app/fuel.py`: educational fuel estimate (`FuelPlan`) from the real distance and winds plus a hypothetical aircraft and load
 - `app.py`: Streamlit entry point and sidebar navigation
 - `views/`: one file per Streamlit page (airport weather, route overview, winds aloft, airport suitability, fuel planner)
 - `PROMPTS.md`: AI collaboration record
