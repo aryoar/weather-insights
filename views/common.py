@@ -24,3 +24,13 @@ def age_text(moment: datetime) -> str:
     minutes = int((datetime.now(timezone.utc) - moment).total_seconds() // 60)
     ago = f"{minutes} min ago" if minutes < 120 else f"{minutes // 60} h ago"
     return f"{moment:%d %b %H:%M} UTC ({ago})"
+
+
+def metric_with_note(column, label: str, value: str, note: str, help: str | None = None) -> None:
+    """A metric with a small grey note under it.
+
+    Streamlit's `delta` would add an ↑/↓ arrow, which reads as "increased"; this is for
+    plain extra information such as the same value in other units.
+    """
+    column.metric(label, value, help=help)
+    column.caption(note)

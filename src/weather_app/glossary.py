@@ -42,4 +42,15 @@ GLOSSARY = {
                    "stronger than the wind at the airport, especially in the jet stream.",
     "Pressure level (hPa)": "Weather models report the upper air at fixed air pressures instead of "
                             "heights. Lower pressure = higher up: 250 hPa is roughly FL340.",
+    "Block fuel": "All the fuel loaded before the engines start: taxi + trip + contingency + "
+                  "alternate + final reserve + any extra the captain adds.",
+    "Trip fuel": "Fuel burned from take-off to landing at the destination.",
+    "Contingency fuel": "A small margin (here 5% of trip fuel) for anything unexpected on the way, "
+                        "such as a longer route or stronger headwind than forecast.",
+    "Final reserve": "Fuel that is never planned to be used: about 30 minutes of flying, kept for "
+                     "emergencies after reaching the alternate.",
+    "Payload": "What the flight carries for its customers: passengers, their bags and cargo. "
+               "Heavier aircraft burn more fuel per hour.",
+    "Ground speed": "Speed over the ground: the aircraft's speed through the air minus the headwind "
+                    "(or plus the tailwind). It decides how long the flight takes.",
 }
