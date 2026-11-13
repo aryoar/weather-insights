@@ -153,3 +153,15 @@ class MetarStore:
             if needs_header:
                 writer.writeheader()
             writer.writerow(row)
+
+    def load(self) -> pd.DataFrame:
+        """Load timestamped METAR observations for local analytics."""
+        if not self.path.exists() or self.path.stat().st_size == 0:
+            return pd.DataFrame(columns=METAR_FIELDS)
+        frame = pd.read_csv(self.path)
+        for column in ("fetched_at", "observed_at"):
+            if column in frame:
+                frame[column] = pd.to_datetime(frame[column], utc=True, errors="coerce")
+        if "observed_at" in frame:
+            frame = frame.dropna(subset=["observed_at"])
+        return frame

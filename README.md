@@ -66,5 +66,7 @@ The **Airport weather** page also saves successful METAR fetches through the sam
 - `src/weather_app/airports.py`: educational airport suitability checks (runway crosswind, daylight, flight category)
 - `src/weather_app/fuel.py`: educational fuel estimate (`FuelPlan`) from the real distance and winds plus a hypothetical aircraft and load
 - `app.py`: Streamlit entry point and sidebar navigation
-- `views/`: one file per Streamlit page (airport weather, route overview, winds aloft, airport suitability, fuel planner)
+- `views/`: one file per Streamlit page, including Live Conditions and Analytics
 - `PROMPTS.md`: AI collaboration record
+
+The Analytics page uses one shared observation-date filter for city weather and airport METARs. It shows city temperature and wind trends, airport flight-category mix, wind/gust and exact visibility history, plus daily temperature ranges and feels-like differences. Daily ranges require at least two temperature observations for the same city and date; the page leaves under-sampled days out rather than treating one reading as a zero range. Charts use only rows present in the history files.

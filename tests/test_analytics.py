@@ -3,7 +3,13 @@
 import pandas as pd
 import pytest
 
-from weather_app.analytics import comfort_ranking, latest_comparison, temperature_trend
+from weather_app.analytics import (
+    airport_ifr_lifr_share,
+    comfort_ranking,
+    daily_temperature_ranges,
+    latest_comparison,
+    temperature_trend,
+)
 
 
 def _history(rows: list[tuple]) -> pd.DataFrame:
@@ -61,3 +67,49 @@ def test_empty_history_gives_empty_results():
     assert latest_comparison(empty).empty
     assert comfort_ranking(empty).empty
     assert temperature_trend(empty, "Madrid, ES").empty
+
+
+def test_daily_temperature_range_requires_multiple_observations_per_local_day():
+    history = _history([
+        ("2026-11-12T08:00Z", "Madrid", "ES", 8.0, 7.0, 50, 2.0),
+        ("2026-11-12T20:00Z", "Madrid", "ES", 17.0, 16.0, 50, 2.0),
+        ("2026-11-13T08:00Z", "Madrid", "ES", 10.0, 9.0, 50, 2.0),
+    ])
+    daily = daily_temperature_ranges(history)
+    first_day = daily.loc[daily["day"] == pd.Timestamp("2026-11-12").date()].iloc[0]
+    second_day = daily.loc[daily["day"] == pd.Timestamp("2026-11-13").date()].iloc[0]
+    assert first_day["min_temperature_c"] == 8.0
+    assert first_day["max_temperature_c"] == 17.0
+    assert first_day["temperature_range_c"] == 9.0
+    assert first_day["observation_count"] == 2
+    assert second_day["observation_count"] == 1
+    assert pd.isna(second_day["temperature_range_c"])
+
+
+def test_airport_ifr_lifr_share_ranks_reports_with_sample_size_and_local_date_filter():
+    history = pd.DataFrame([
+        {"observed_at": "2026-11-12T23:30:00Z", "icao": "LEMD", "name": "Madrid",
+         "flight_category": "IFR"},  # Nov 13 in Madrid
+        {"observed_at": "2026-11-13T09:00:00Z", "icao": "LEMD", "name": "Madrid",
+         "flight_category": "VFR"},
+        {"observed_at": "2026-11-13T09:00:00Z", "icao": "EGLL", "name": "London",
+         "flight_category": "LIFR"},
+        {"observed_at": "2026-11-14T00:30:00Z", "icao": "EGLL", "name": "London",
+         "flight_category": "VFR"},
+    ])
+    ranked = airport_ifr_lifr_share(
+        history, pd.Timestamp("2026-11-13").date(), pd.Timestamp("2026-11-13").date()
+    )
+    assert ranked["icao"].tolist() == ["EGLL", "LEMD"]
+    assert ranked["ifr_lifr_share_pct"].tolist() == [100.0, 50.0]
+    assert ranked["observation_count"].tolist() == [1, 2]
+    assert airport_ifr_lifr_share(
+        history, pd.Timestamp("2026-11-13").date(), pd.Timestamp("2026-11-13").date(), ["LEMD"]
+    )["icao"].tolist() == ["LEMD"]
+
+
+def test_airport_ifr_lifr_share_handles_invalid_range_and_empty_data():
+    empty = pd.DataFrame(columns=["observed_at", "icao", "flight_category"])
+    day = pd.Timestamp("2026-11-13").date()
+    assert airport_ifr_lifr_share(empty, day, day).empty
+    assert airport_ifr_lifr_share(HISTORY, day, day - pd.Timedelta(days=1)).empty
