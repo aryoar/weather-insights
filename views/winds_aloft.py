@@ -16,11 +16,11 @@ import streamlit as st
 
 from weather_app.client import AviationWeatherClient, OpenMeteoClient
 from weather_app.glossary import GLOSSARY
-from weather_app.reports import clean_icao_code
 from weather_app.route import KM_PER_NM, Route
 from weather_app.winds import RouteWinds, best_level_hint
 
-from .common import metric_with_note, show_glossary
+from .common import get_route, metric_with_note, route_missing_notice, show_glossary
+from .theme import AXIS, HEAD_COLOUR, HEADWIND_SCALE, TAIL_COLOUR, chart, hero
 
 API_ERRORS = (ConnectionError, PermissionError, LookupError, RuntimeError, ValueError)
 
@@ -41,48 +41,18 @@ def _fetch_winds(points: tuple[tuple[float, float], ...]):
 # ---------------------------------------------------------------- input ----
 
 def _read_request() -> dict | None:
-    """Form for the route. Starts from the route chosen on the other pages."""
-    shared = st.session_state.get("selected_airports", {})
-    route_page = st.session_state.get("route_request", {})
+    """Airports from the sidebar ('Your flight', validated there) plus this page's point slider."""
+    route = get_route()
+    if route is None:
+        route_missing_notice()
+        return None
     last = st.session_state.get("winds_request", {})
-    defaults = {
-        "winds_departure": last.get("departure", route_page.get("departure", shared.get("Departure", "LEMD"))),
-        "winds_destination": last.get("destination", route_page.get("destination", shared.get("Destination", "EGLL"))),
-        "winds_point_count": last.get("point_count", 8),
-    }
-    for key, value in defaults.items():
-        st.session_state.setdefault(key, value)
-
-    with st.form("winds_form"):
-        left, mid, right = st.columns([1, 1, 1.4])
-        departure = left.text_input("Departure airport (ICAO code)", key="winds_departure",
-                                    max_chars=4, help=GLOSSARY["ICAO code"])
-        destination = mid.text_input("Destination airport (ICAO code)", key="winds_destination",
-                                     max_chars=4, help=GLOSSARY["ICAO code"])
-        point_count = right.slider("Points along the route", 4, 12, key="winds_point_count",
-                                   help="Including departure and destination. All points are fetched in one request.")
-        submitted = st.form_submit_button("Show winds aloft", type="primary")
-
-    if submitted:
-        problems = []
-        try:
-            departure = clean_icao_code(departure)
-        except ValueError as exc:
-            problems.append(f"Departure: {exc}")
-        try:
-            destination = clean_icao_code(destination)
-        except ValueError as exc:
-            problems.append(f"Destination: {exc}")
-        if not problems and departure == destination:
-            problems.append("Departure and destination must be two different airports.")
-        for problem in problems:
-            st.error(problem)
-        if problems:
-            return None
-        st.session_state.winds_request = {"departure": departure, "destination": destination,
-                                          "point_count": point_count}
-        st.session_state.selected_airports = {**shared, "Departure": departure, "Destination": destination}
-    return st.session_state.get("winds_request")
+    st.session_state.setdefault("winds_point_count", last.get("point_count", 8))
+    point_count = st.slider("Points along the route", 4, 12, key="winds_point_count",
+                            help="Including departure and destination. All points are fetched in one request.")
+    st.session_state.winds_request = {"departure": route["departure"], "destination": route["destination"],
+                                      "point_count": point_count}
+    return st.session_state.winds_request
 
 
 # ---------------------------------------------------------------- charts ----
@@ -95,33 +65,40 @@ def _heatmap(winds: RouteWinds) -> go.Figure:
     levels = list(reversed(winds.flight_levels))  # highest at the top, like the sky
     z = [winds.headwinds_at(fl) for fl in levels]
     limit = max((abs(v) for row in z for v in row if v is not None), default=1) or 1
+    cells = [(v, fl, x) for fl, row in zip(levels, z) for x, v in zip(winds.distances_nm, row) if v is not None]
+    worst = max(cells, default=None)
+    title = ("Headwind (red) or tailwind (blue) along the route" if worst is None or worst[0] <= 0 else
+             f"Strongest headwind: {worst[0]:.0f} kt at FL{worst[1]:03d}, {worst[2]:,.0f} nm along the route")
     fig = go.Figure(go.Heatmap(
         x=winds.distances_nm, y=[_level_label(fl) for fl in levels], z=z,
-        zmin=-limit, zmax=limit, colorscale="RdBu_r",
+        zmin=-limit, zmax=limit, colorscale=HEADWIND_SCALE, xgap=2, ygap=2,
         text=[[("n/a" if v is None else f"{v:+.0f}") for v in row] for row in z], texttemplate="%{text}",
-        colorbar={"title": {"text": "Headwind (kt)<br>+ against, − behind"}},
-        hovertemplate="%{y}<br>%{x} nm from departure<br>Headwind: %{z:+.0f} kt<extra></extra>",
+        colorbar={"title": {"text": "Headwind (kt)<br>+ against, − behind"}, "tickfont": {"color": AXIS}},
+        hovertemplate="%{y}<br>%{x:,.0f} nm from departure<br>Headwind: %{z:+.0f} kt<extra></extra>",
     ))
     fig.update_layout(
-        title="Headwind (red) or tailwind (blue) along the route",
-        xaxis_title="Distance from departure (nm)", yaxis_title="Cruise height (flight level)",
-        margin={"t": 50, "b": 10}, height=420,
+        title=title,
+        xaxis_title="Distance from departure (nm; 1 nm = 1.852 km)", yaxis_title="Cruise height (flight level)",
+        height=420,
     )
     return fig
 
 
 def _bar_chart(table: pd.DataFrame) -> go.Figure:
-    colours = ["#d62728" if v > 0 else "#1f77b4" for v in table["headwind_kt"]]
+    colours = [HEAD_COLOUR if v > 0 else TAIL_COLOUR for v in table["headwind_kt"]]
+    best = table.loc[table["headwind_kt"].idxmin()]
+    kind = "tailwind" if best["headwind_kt"] < 0 else "headwind"
     fig = go.Figure(go.Bar(
         x=table["headwind_kt"], y=[_level_label(fl) for fl in table["flight_level"]], orientation="h",
         marker_color=colours, text=[f"{v:+.0f} kt" for v in table["headwind_kt"]], textposition="outside",
-        hovertemplate="%{y}<br>Average headwind: %{x:+.1f} kt<extra></extra>",
+        cliponaxis=False, customdata=table["headwind_kmh"],
+        hovertemplate="%{y}<br>Average headwind: %{x:+.1f} kt (%{customdata:+.0f} km/h)<extra></extra>",
     ))
-    fig.add_vline(x=0, line_color="grey")
+    fig.add_vline(x=0, line_color=AXIS)
     fig.update_layout(
-        title="Average headwind per height (negative = tailwind)",
-        xaxis_title="Average headwind along the route (kt)", yaxis_title="Cruise height (flight level)",
-        margin={"t": 50, "b": 10}, height=360,
+        title=f"FL{int(best['flight_level']):03d} is best today: {abs(best['headwind_kt']):.0f} kt average {kind}",
+        xaxis_title="Average headwind along the route (kt; − = tailwind, 1 kt = 1.852 km/h)",
+        yaxis_title="Cruise height (flight level)", height=360,
     )
     return fig
 
@@ -137,12 +114,9 @@ def _effect(headwind_kt: float) -> str:
 # ---------------------------------------------------------------- page ----
 
 def render() -> None:
-    st.header("Winds aloft (model-based estimate)")
-    st.write(
-        "How strong the wind is at the heights airliners cruise, and whether each height pushes the "
-        "aircraft along (**tailwind**) or holds it back (**headwind**). Winds come from the free "
-        "**Open-Meteo** weather model; airport positions from aviationweather.gov."
-    )
+    hero("Winds aloft (model-based estimate)", "How strong the wind is at cruise heights, and whether each "
+         "height pushes the aircraft along (tailwind) or holds it back (headwind). Winds from the Open-Meteo "
+         "model; airport positions from aviationweather.gov.", kicker="Brief · Step 2")
     st.caption("⚠️ Our own approximation from weather-model data. Not an official SIGWX chart and "
                "not for real flight planning.")
 
@@ -192,8 +166,10 @@ def render() -> None:
 
     # 4. Charts
     table = pd.DataFrame(winds.summary_rows())
-    st.plotly_chart(_heatmap(winds), width="stretch")
-    st.plotly_chart(_bar_chart(table), width="stretch")
+    grid = pd.DataFrame({_level_label(fl): winds.headwinds_at(fl) for fl in winds.flight_levels})
+    grid.insert(0, "Distance from departure (nm)", [round(d) for d in winds.distances_nm])
+    chart(_heatmap(winds), grid, key="winds_heatmap")
+    chart(_bar_chart(table), table, key="winds_bars")
     st.caption("Headwind = wind speed × cos(wind direction − direction of flight), at each point, "
                "using the direction of the route at that point. Positive = headwind, negative = tailwind.")
 

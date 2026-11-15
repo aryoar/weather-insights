@@ -1,6 +1,19 @@
-# Weather Insights
+# Weather Insights: SkyBrief Academy (flight-school edition)
 
-Weather Insights is a Streamlit application for viewing current conditions from OpenWeatherMap and building a local, timestamped history for several cities and airports. Analytics charts show city temperature and wind trends, airport condition patterns, daily temperature ranges, and feels-like differences.
+**SkyBrief Academy** is a training app for flight schools: "DataCamp for aviation weather". Student pilots practise decoding **real** METARs and making go/no-go decisions on **live** data; instructors set the limits and build practice scenarios. Units follow EASA practice: metric next to knots and feet.
+
+> ⚠️ Training aid only: not for real flight planning. Every page says so.
+
+What a student does in one session:
+
+1. **Learn**: *Start here* explains the flow; the **METAR trainer** shows a real METAR from one of eight European airports (LEMD, LEBL, LEPA, EGLL, LFPG, EDDF, LIRF, EHAM) and asks five multiple-choice questions (wind, visibility, ceiling, flight category, temperature/dew point, QNH), each with an explanation.
+2. **Brief**: choose the flight once in the sidebar (**Your flight**: departure, destination, alternate; default LEMD → EGLL, alternate LFPG). Airport weather, Route overview, Winds aloft, Airport suitability and Fuel planner all use it. The **Briefing sheet** puts it on one downloadable page.
+3. **Practise**: on **Go / No-Go** the student commits to GO or NO-GO for the departure airport first, then sees every check (crosswind on the best runway, visibility, ceiling, gust spread, VFR) against EXAMPLE student limits (10 kt, 5 km, 1,500 ft, 10 kt, VFR only; not regulations). **Instructor mode** in the sidebar edits the limits and can override wind, visibility and ceiling as a clearly marked SCENARIO.
+4. **Data**: Live Conditions and Analytics keep the original weather-history features (three analytics views on our real logged data).
+
+Weather data is always real (aviationweather.gov, OpenWeatherMap, Open-Meteo, and our own logs). If aviationweather.gov cannot be reached, the trainer, Go/No-Go and the briefing sheet fall back to the latest real METARs in `data/metar_history.csv` and say so on the page; nothing is invented.
+
+The app also builds a local, timestamped history for several cities and airports. Analytics charts show city temperature and wind trends, airport condition patterns, daily temperature ranges, and feels-like differences.
 
 ## Setup
 
@@ -62,8 +75,15 @@ The **Airport weather** page also saves successful METAR fetches through the sam
 - `src/weather_app/route.py` and `winds.py`: great-circle route geometry, and winds aloft with the headwind along a route
 - `src/weather_app/airports.py`: educational airport suitability checks (runway crosswind, daylight, flight category)
 - `src/weather_app/fuel.py`: educational fuel estimate (`FuelPlan`) from the real distance and winds plus a hypothetical aircraft and load
-- `app.py`: Streamlit entry point and sidebar navigation
-- `views/`: one file per Streamlit page, including Live Conditions and Analytics
+- `src/weather_app/training.py`: METAR trainer questions (`MetarQuestion`, `build_questions`, `Scoreboard`) built from a real `MetarReport`
+- `src/weather_app/decision.py`: Go/No-Go checks (`PilotLimits`, `Check`, `Decision`, `evaluate_go_no_go`, `grade_choice`) and instructor scenarios (`apply_scenario`)
+- `src/weather_app/logged_metars.py`: reads the METAR history back as `MetarReport` objects (offline fallback)
+- `src/weather_app/briefing.py`: `BriefingSheet`, the one-page flight summary
+- `app.py`: Streamlit entry point: `st.navigation` with four sections (Learn, Brief, Practise, Data) and the shared **Your flight** sidebar
+- `views/`: one file per Streamlit page (each has `render()`), including `home.py` (Start here), `metar_trainer.py`, `go_no_go.py`, `briefing_sheet.py`, Live Conditions and Analytics
+- `views/common.py`: shared helpers: `sidebar_flight()` / `get_route()` (the flight used by every page), glossary, SCENARIO banner, METARs with logged fallback
+- `views/theme.py` and `.streamlit/config.toml`: app name (`APP_NAME`, easy to rename), dark theme, colour palette (contrast-checked), page header, cards, status badges and the shared chart style
+- `tests/test_training.py`, `tests/test_decision.py`, `tests/test_briefing.py`: hand-made inputs with known answers, no network
 - `PROMPTS.md`: AI collaboration record
 
 The Analytics page uses one shared observation-date filter for city weather and airport METARs. It shows city temperature and wind trends, airport flight-category mix, wind/gust and exact visibility history, plus daily temperature ranges and feels-like differences. Daily ranges require at least two temperature observations for the same city and date; the page leaves under-sampled days out rather than treating one reading as a zero range. Repeated identical city payloads fetched within two minutes and repeated airport observations are counted once in analytics. Charts use only rows present in the history files.

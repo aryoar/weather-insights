@@ -8,13 +8,11 @@ import streamlit as st
 
 from weather_app.client import AviationWeatherClient
 from weather_app.glossary import GLOSSARY
-from weather_app.reports import M_PER_FOOT, clean_icao_code
+from weather_app.reports import M_PER_FOOT
 from weather_app.storage import MetarStore
 
-from .common import age_text, show_glossary
-
-ROLES = ["Departure", "Destination", "Alternate"]
-DEFAULT_CODES = {"Departure": "LEMD", "Destination": "EGLL", "Alternate": "LFPG"}
+from .common import age_text, get_route, route_missing_notice, show_glossary
+from .theme import hero, raw_report, status_badge
 
 
 # Cache answers for 5 minutes: METARs change at most every 30 min, and the API asks
@@ -37,45 +35,25 @@ def _fetch_reports(codes: tuple[str, ...]):
 
 
 def _read_codes() -> dict[str, str] | None:
-    """Form with one code per role. Returns {role: code} once the user submits valid codes."""
-    with st.form("airport_codes"):
-        columns = st.columns(3)
-        typed = {
-            role: column.text_input(
-                f"{role} airport (ICAO code)",
-                value=st.session_state.get("selected_airports", DEFAULT_CODES)[role],
-                max_chars=4,
-                help=GLOSSARY["ICAO code"] if role != "Alternate" else GLOSSARY["Alternate airport"],
-            )
-            for role, column in zip(ROLES, columns)
-        }
-        submitted = st.form_submit_button("Show airport weather", type="primary")
-
-    if submitted:
-        cleaned, problems = {}, []
-        for role, code in typed.items():
-            try:
-                cleaned[role] = clean_icao_code(code)
-            except ValueError as exc:
-                problems.append(f"{role}: {exc}")
-        if problems:
-            for problem in problems:
-                st.error(problem)
-            return None
-        st.session_state.selected_airports = cleaned
-    return st.session_state.get("selected_airports")
+    """{role: code} for the flight chosen in the sidebar ('Your flight'), already validated there."""
+    route = get_route()
+    if route is None:
+        route_missing_notice()
+        return None
+    return {"Departure": route["departure"], "Destination": route["destination"], "Alternate": route["alternate"]}
 
 
 def _show_summary(metars) -> None:
     """Worst airport first. sorted() works on MetarReport because it defines __lt__."""
     ranked = sorted(metars, reverse=True)
-    parts = [f"{m.category_info['emoji']} **{m.icao}** {m.flight_category}" for m in ranked]
-    st.markdown("**Flying conditions, worst first:** " + " → ".join(parts))
+    parts = [status_badge(m.flight_category, f"{m.icao} {m.flight_category}") for m in ranked]
+    st.markdown("**Flying conditions, worst first:** " + " → ".join(parts), unsafe_allow_html=True)
 
 
 def _show_metar(metar) -> None:
     info = metar.category_info
-    st.markdown(f"#### {info['emoji']} {info['label']} flying conditions ({metar.flight_category})")
+    st.markdown(f"{status_badge(metar.flight_category)} &nbsp; **{info['label']} flying conditions**",
+                unsafe_allow_html=True)
     st.caption(info["explanation"])
 
     cols = st.columns(4)
@@ -94,8 +72,8 @@ def _show_metar(metar) -> None:
     )
     st.write(f"**Wind:** {metar.wind_text}. **Weather:** {metar.weather_text}. **Clouds:** {metar.clouds_text}.")
     st.caption(f"Observed {age_text(metar.observed_at)}")
-    with st.expander("Raw METAR (the coded text pilots read)"):
-        st.code(metar.raw_text, language=None)
+    st.caption("Raw METAR (the coded text pilots read)")
+    raw_report(metar.raw_text)
 
 
 def _show_taf(taf) -> None:
@@ -111,11 +89,8 @@ def _show_taf(taf) -> None:
 
 
 def render() -> None:
-    st.header("Airport weather")
-    st.write(
-        "Current weather (**METAR**) and official forecast (**TAF**) for the airports of your flight. "
-        "Real reports from aviationweather.gov, translated into plain language."
-    )
+    hero("Airport weather", "Current weather (METAR) and official forecast (TAF) for the three airports "
+         "of your flight: real reports from aviationweather.gov, in plain language.", kicker="Brief · Step 1")
     codes = _read_codes()
     if not codes:
         return

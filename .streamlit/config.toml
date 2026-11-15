@@ -1,0 +1,28 @@
+# SkyBrief Academy theme (dark navy cockpit style). Colours are explained in views/theme.py.
+# Amber (#F5A623) is for the interface only (buttons, links, focus), never for a chart series.
+
+[theme]
+base = "dark"
+primaryColor = "#F5A623"
+backgroundColor = "#0B1F3A"
+secondaryBackgroundColor = "#12294A"
+textColor = "#E8EEF7"
+linkColor = "#F5A623"
+borderColor = "#24406A"
+codeBackgroundColor = "#081830"
+font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+headingFont = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+codeFont = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+baseRadius = "0.6rem"
+showSidebarBorder = true
+dataframeHeaderBackgroundColor = "#12294A"
+# Fixed series order (never cycled), a single blue ramp for magnitude, blue-grey-red for head/tailwind.
+chartCategoricalColors = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#0ca30c", "#9085e9", "#e66767"]
+chartSequentialColors = ["#0f2c52", "#123a6b", "#164985", "#1a589e", "#2067b8", "#2b77cf", "#3987e5", "#5e9eea", "#86b6f0", "#b0cff6"]
+chartDivergingColors = ["#3987e5", "#5a97de", "#7aa6d4", "#98b2c6", "#898781", "#c79a8f", "#d98576", "#e2705f", "#e65f52", "#e66767"]
+
+[theme.sidebar]
+backgroundColor = "#12294A"
+secondaryBackgroundColor = "#0B1F3A"
+textColor = "#E8EEF7"
+borderColor = "#24406A"

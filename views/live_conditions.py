@@ -6,9 +6,12 @@ from weather_app.client import WeatherClient
 from weather_app.config import get_api_key
 from weather_app.storage import WeatherStore
 
+from .theme import hero
+
 
 def render() -> None:
-    st.header("Live Conditions")
+    hero("Live Conditions", "Fetch the current weather for any city from OpenWeatherMap. Every successful "
+         "fetch is added to our history, which feeds the Analytics page.", kicker="Data · Collect")
     store = WeatherStore()
     if "cities" not in st.session_state:
         st.session_state.cities = []

@@ -14,10 +14,14 @@ from weather_app.analytics import (
 )
 from weather_app.storage import MetarStore, WeatherStore
 
+from .theme import CATEGORY_STYLE, SERIES, chart, colour_for, colour_map, hero
+
 DEFAULT_CITIES = ("Madrid", "London", "Paris")
 DEFAULT_AIRPORTS = ("LEMD", "EGLL", "LFPG")
 CATEGORY_ORDER = ["VFR", "MVFR", "IFR", "LIFR"]
-CATEGORY_COLOURS = {"VFR": "#2ca02c", "MVFR": "#1f77b4", "IFR": "#d62728", "LIFR": "#9467bd"}
+CATEGORY_COLOURS = {code: style["colour"] for code, style in CATEGORY_STYLE.items()}
+# Legend labels carry an icon as well as the colour, so colour is never the only cue.
+CATEGORY_LABELS = {code: f"{style['icon']} {code}" for code, style in CATEGORY_STYLE.items()}
 
 
 def _local_dates(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -134,25 +138,32 @@ def _plot_weather_trends(history: pd.DataFrame, city: str) -> tuple[go.Figure | 
             data[column] = pd.to_numeric(data[column], errors="coerce")
     count = len(data)
 
+    colour = colour_for(city) or SERIES[0]
     temperature = None
     if "temperature_c" in data and data["temperature_c"].notna().any():
+        temps = data.dropna(subset=["temperature_c"])
         temperature = px.line(
-            data.dropna(subset=["temperature_c"]), x="observed_at", y="temperature_c",
-            markers=True, title=f"Temperature in {city}",
-            color_discrete_sequence=["#e76f51"],
+            temps, x="observed_at", y="temperature_c",
+            markers=True, title=(f"{city}: {temps['temperature_c'].iloc[0]:.0f} → {temps['temperature_c'].iloc[-1]:.0f} °C, "
+                                 f"between {temps['temperature_c'].min():.0f} and {temps['temperature_c'].max():.0f} °C"),
+            color_discrete_sequence=[colour],
             hover_data={"observed_at": "|%d %b %Y %H:%M UTC", "temperature_c": ":.1f"},
         )
         temperature.update_layout(xaxis_title="Observation time (UTC)", yaxis_title="Temperature (°C)")
 
     wind = None
     if "wind_speed_mps" in data and data["wind_speed_mps"].notna().any():
+        winds = data.dropna(subset=["wind_speed_mps"])
+        peak = winds.loc[winds["wind_speed_mps"].idxmax()]
         wind = px.line(
-            data.dropna(subset=["wind_speed_mps"]), x="observed_at", y="wind_speed_mps",
-            markers=True, title=f"Wind speed in {city}",
-            color_discrete_sequence=["#277da1"],
+            winds, x="observed_at", y="wind_speed_mps",
+            markers=True, title=(f"{city}: wind peaked at {peak['wind_speed_mps']:.1f} m/s "
+                                 f"({peak['wind_speed_mps'] * 3.6:.0f} km/h) on {peak['observed_at']:%d %b}"),
+            color_discrete_sequence=[colour],
             hover_data={"observed_at": "|%d %b %Y %H:%M UTC", "wind_speed_mps": ":.1f"},
         )
-        wind.update_layout(xaxis_title="Observation time (UTC)", yaxis_title="Wind speed (m/s)")
+        wind.update_layout(xaxis_title="Observation time (UTC)", yaxis_title="Wind speed (m/s; × 3.6 = km/h)",
+                           yaxis_rangemode="tozero")
     return temperature, wind, count
 
 
@@ -168,13 +179,20 @@ def _airport_category_chart(history: pd.DataFrame) -> go.Figure | None:
     counts = counts.loc[counts["flight_category"].isin(CATEGORY_ORDER)]
     if counts.empty:
         return None
+    totals = counts.groupby("icao")["reports"].sum()
+    poor = counts.loc[counts["flight_category"].isin(["IFR", "LIFR"])].groupby("icao")["reports"].sum()
+    share = (poor / totals).fillna(0).sort_values(ascending=False)
+    title = ("Every logged report was VFR or MVFR" if share.empty or share.iloc[0] == 0 else
+             f"{share.index[0]} had the most IFR/LIFR time: {share.iloc[0]:.0%} of its reports")
+    order = list(totals.sort_values(ascending=False).index)  # most reports first
+    counts["category"] = counts["flight_category"].map(CATEGORY_LABELS)
     fig = px.bar(
-        counts, x="icao", y="reports", color="flight_category", barmode="stack",
-        category_orders={"flight_category": CATEGORY_ORDER}, color_discrete_map=CATEGORY_COLOURS,
-        title="Observed flight category mix by airport",
-        hover_data={"icao": True, "flight_category": True, "reports": True},
+        counts, x="icao", y="reports", color="category", barmode="stack",
+        category_orders={"category": [CATEGORY_LABELS[c] for c in CATEGORY_ORDER], "icao": order},
+        color_discrete_map={CATEGORY_LABELS[c]: CATEGORY_COLOURS[c] for c in CATEGORY_ORDER},
+        title=title, hover_data={"icao": True, "category": True, "reports": True},
     )
-    fig.update_layout(xaxis_title="Airport", yaxis_title="METAR reports", legend_title="Flight category")
+    fig.update_layout(xaxis_title="Airport", yaxis_title="METAR reports (count)", legend_title="Flight category")
     return fig
 
 
@@ -188,22 +206,26 @@ def _airport_wind_chart(history: pd.DataFrame) -> go.Figure | None:
     if data.empty:
         return None
     fig = go.Figure()
+    colours = colour_map(sorted(data["icao"].astype(str).unique()))
     for airport, rows in data.groupby("icao"):
         fig.add_trace(go.Scatter(
             x=rows["observed_at"], y=rows["wind_speed_kt"], mode="lines+markers",
-            name=f"{airport} wind", legendgroup=str(airport),
-            hovertemplate=f"{airport}<br>%{{x|%d %b %H:%M UTC}}<br>Wind: %{{y:.0f}} kt<extra></extra>",
+            name=f"{airport} wind", legendgroup=str(airport), line={"color": colours[str(airport)]},
+            customdata=rows["wind_speed_kt"] * 1.852,
+            hovertemplate=f"{airport}<br>%{{x|%d %b %H:%M UTC}}<br>Wind: %{{y:.0f}} kt (%{{customdata:.0f}} km/h)<extra></extra>",
         ))
         if "wind_gust_kt" in rows and rows["wind_gust_kt"].notna().any():
             gusts = rows.dropna(subset=["wind_gust_kt"])
             fig.add_trace(go.Scatter(
                 x=gusts["observed_at"], y=pd.to_numeric(gusts["wind_gust_kt"], errors="coerce"),
-                mode="markers", marker={"symbol": "diamond", "size": 9},
+                mode="markers", marker={"symbol": "diamond", "size": 9, "color": colours[str(airport)]},
                 name=f"{airport} gust", legendgroup=str(airport),
                 hovertemplate=f"{airport}<br>%{{x|%d %b %H:%M UTC}}<br>Gust: %{{y:.0f}} kt<extra></extra>",
             ))
-    fig.update_layout(title="Airport wind and reported gusts", xaxis_title="Observation time (UTC)",
-                      yaxis_title="Wind speed / gust (kt)", hovermode="x unified")
+    strongest = data.loc[data["wind_speed_kt"].idxmax()]
+    fig.update_layout(title=(f"Strongest wind: {strongest['wind_speed_kt']:.0f} kt at {strongest['icao']} "
+                             f"on {strongest['observed_at']:%d %b}"), xaxis_title="Observation time (UTC)",
+                      yaxis_title="Wind / gust (kt; 1 kt = 1.852 km/h)", hovermode="x unified", yaxis_rangemode="tozero")
     return fig
 
 
@@ -219,12 +241,14 @@ def _airport_visibility_chart(history: pd.DataFrame) -> go.Figure | None:
     data = data.dropna(subset=["observed_at", "visibility_km", "icao"]).sort_values("observed_at")
     if data.empty:
         return None
+    lowest = data.loc[data["visibility_km"].idxmin()]
     fig = px.line(
         data, x="observed_at", y="visibility_km", color="icao", markers=True,
-        title="Reported airport visibility over time",
+        color_discrete_map=colour_map(sorted(data["icao"].astype(str).unique())),
+        title=f"Lowest exact visibility: {lowest['visibility_km']:.1f} km at {lowest['icao']} on {lowest['observed_at']:%d %b}",
         hover_data={"observed_at": "|%d %b %Y %H:%M UTC", "visibility_km": ":.1f", "icao": True},
     )
-    fig.update_layout(xaxis_title="Observation time (UTC)", yaxis_title="Visibility (km)")
+    fig.update_layout(xaxis_title="Observation time (UTC)", yaxis_title="Visibility (km)", yaxis_rangemode="tozero")
     return fig
 
 
@@ -270,19 +294,22 @@ def _feels_like_chart(history: pd.DataFrame) -> go.Figure | None:
     data["city_label"] = data["city"].astype(str) + data["country"].fillna("").map(
         lambda country: f", {country}" if country else ""
     )
+    mean_gap = data.groupby("city_label")["feels_like_delta_c"].mean()
+    coldest = mean_gap.idxmin()
     fig = px.line(
         data, x="observed_at", y="feels_like_delta_c", color="city_label", markers=True,
-        title="Feels-like difference through time",
+        color_discrete_map=colour_map(sorted(data["city_label"].unique())),
+        title=f"{coldest} feels {abs(mean_gap[coldest]):.1f} °C {'colder' if mean_gap[coldest] < 0 else 'warmer'} than the air on average",
         hover_data={"observed_at": "|%d %b %Y %H:%M UTC", "feels_like_delta_c": ":+.1f", "city_label": True},
     )
-    fig.add_hline(y=0, line_color="grey")
+    fig.add_hline(y=0, line_color="#8A9BB5")
     fig.update_layout(xaxis_title="Observation time (UTC)", yaxis_title="Feels like − air temperature (°C)")
     return fig
 
 
 def render() -> None:
-    st.header("Analytics")
-    st.write("See how weather has changed in your selected cities, compare conditions at tracked airports, and explore daily temperature and feels-like patterns.")
+    hero("Analytics", "How the weather changed in the cities and at the airports we logged: trends, "
+         "airport conditions and daily patterns, from our own recorded observations.", kicker="Data · History")
     st.caption("Charts use recorded observations only. Dates are filtered in Madrid local time; chart timestamps use UTC.")
 
     try:
@@ -335,11 +362,11 @@ def render() -> None:
                 help="Latest recorded wind speed within the selected date range.",
             )
             if temperature_fig is not None:
-                st.plotly_chart(temperature_fig, width="stretch")
+                chart(temperature_fig, key="an_temperature")
             else:
                 st.info("Temperature values are missing for this city and date range.")
             if wind_fig is not None:
-                st.plotly_chart(wind_fig, width="stretch")
+                chart(wind_fig, key="an_city_wind")
             else:
                 st.info("Wind speed values are missing for this city and date range.")
             if count < 2:
@@ -354,15 +381,15 @@ def render() -> None:
             wind_fig = _airport_wind_chart(filtered_metars)
             visibility_fig = _airport_visibility_chart(filtered_metars)
             if category_fig is not None:
-                st.plotly_chart(category_fig, width="stretch")
+                chart(category_fig, key="an_categories")
             else:
                 st.info("Flight category values are unavailable in these reports.")
             if wind_fig is not None:
-                st.plotly_chart(wind_fig, width="stretch")
+                chart(wind_fig, key="an_airport_wind")
             else:
                 st.info("Wind speed values are unavailable in these reports.")
             if visibility_fig is not None:
-                st.plotly_chart(visibility_fig, width="stretch")
+                chart(visibility_fig, key="an_visibility")
                 st.caption("Visibility reports marked as 9999 or greater are omitted from the exact-value trend.")
             else:
                 st.info("No exact visibility measurements are available in this range.")
@@ -403,9 +430,13 @@ def render() -> None:
                 if valid_daily.empty:
                     st.info("Daily range needs at least two temperatures for the same city and local date; none of the selected city-days has enough samples yet.")
                 else:
+                    widest = valid_daily.loc[valid_daily["temperature_range_c"].idxmax()]
                     range_fig = px.bar(
                         valid_daily, x=valid_daily["day"].astype(str), y="temperature_range_c",
-                        color="location", barmode="group", title="Observed daily temperature range by city",
+                        color="location", barmode="group",
+                        color_discrete_map=colour_map(sorted(valid_daily["location"].astype(str).unique())),
+                        title=(f"Widest daily range: {widest['temperature_range_c']:.1f} °C in {widest['location']} "
+                               f"on {widest['day']}"),
                         custom_data=["min_temperature_c", "max_temperature_c", "observation_count"],
                     )
                     range_fig.update_traces(hovertemplate=(
@@ -414,9 +445,9 @@ def render() -> None:
                         "<br>Observations: %{customdata[2]}<extra></extra>"
                     ))
                     range_fig.update_layout(xaxis_title="Date (Madrid local time)", yaxis_title="Daily range (°C)")
-                    st.plotly_chart(range_fig, width="stretch")
+                    chart(range_fig, key="an_daily_range")
                 if feels is not None:
-                    st.plotly_chart(feels, width="stretch")
+                    chart(feels, key="an_feels")
                 else:
                     st.info("Feels-like measurements are unavailable in the selected history.")
                 table = daily.rename(columns={
