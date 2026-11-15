@@ -15,11 +15,11 @@ import streamlit as st
 from weather_app.client import AviationWeatherClient, OpenMeteoClient
 from weather_app.fuel import AIRCRAFT_PROFILES, FuelPlan
 from weather_app.glossary import GLOSSARY
-from weather_app.reports import clean_icao_code
 from weather_app.route import Route, great_circle_nm
 from weather_app.winds import FLIGHT_LEVELS, RouteWinds
 
-from .common import metric_with_note, scenario_banner, show_glossary
+from .common import get_route, metric_with_note, route_missing_notice, scenario_banner, show_glossary
+from .theme import AXIS, HEAD_COLOUR, OTHER, TAIL_COLOUR, chart, hero
 
 API_ERRORS = (ConnectionError, PermissionError, LookupError, RuntimeError, ValueError)
 WIND_POINTS = 8  # points along the route where winds are sampled (one request for all)
@@ -41,13 +41,13 @@ def _fetch_winds(points: tuple[tuple[float, float], ...]):
 # ---------------------------------------------------------------- input ----
 
 def _read_request() -> dict | None:
-    """Form for the flight. Starts from the airports chosen on the other pages."""
-    shared = st.session_state.get("selected_airports", {})
+    """Airports from the sidebar ('Your flight', validated there) plus the scenario form below."""
+    route = get_route()
+    if route is None:
+        route_missing_notice()
+        return None
     last = st.session_state.get("fuel_request", {})
     defaults = {
-        "fuel_departure": last.get("departure", shared.get("Departure", "LEMD")),
-        "fuel_destination": last.get("destination", shared.get("Destination", "EGLL")),
-        "fuel_alternate": last.get("alternate", shared.get("Alternate", "LFPG")),
         "fuel_aircraft": last.get("aircraft", "Narrow-body jet"),
         "fuel_flight_level": last.get("flight_level", 340),
         "fuel_passengers": last.get("passengers", 150),
@@ -59,15 +59,10 @@ def _read_request() -> dict | None:
         st.session_state.setdefault(key, value)
 
     with st.form("fuel_form"):
-        st.markdown("**Real flight**: airports and cruise height")
-        c1, c2, c3, c4 = st.columns(4)
-        departure = c1.text_input("Departure (ICAO)", key="fuel_departure", max_chars=4,
-                                  help=GLOSSARY["ICAO code"])
-        destination = c2.text_input("Destination (ICAO)", key="fuel_destination", max_chars=4,
-                                    help=GLOSSARY["ICAO code"])
-        alternate = c3.text_input("Alternate (ICAO)", key="fuel_alternate", max_chars=4,
-                                  help=GLOSSARY["Alternate airport"])
-        flight_level = c4.selectbox("Cruise height", sorted(FLIGHT_LEVELS.values()), key="fuel_flight_level",
+        st.markdown(f"**Real flight**: {route['departure']} → {route['destination']}, alternate "
+                    f"{route['alternate']} (change it in **Your flight** in the sidebar), and cruise height")
+        c1, _ = st.columns([1, 3])
+        flight_level = c1.selectbox("Cruise height", sorted(FLIGHT_LEVELS.values()), key="fuel_flight_level",
                                     format_func=lambda fl: f"FL{fl:03d} (~{fl * 30.48 / 1000:.1f} km)",
                                     help=GLOSSARY["Flight level (FL)"] + " Each aircraft class has its own "
                                          "cruise range, shown next to its name below.")
@@ -85,14 +80,7 @@ def _read_request() -> dict | None:
         submitted = st.form_submit_button("Estimate fuel", type="primary")
 
     if submitted:
-        problems, codes = [], {}
-        for role, code in (("Departure", departure), ("Destination", destination), ("Alternate", alternate)):
-            try:
-                codes[role] = clean_icao_code(code)
-            except ValueError as exc:
-                problems.append(f"{role}: {exc}")
-        if not problems and len(set(codes.values())) < 3:
-            problems.append("Departure, destination and alternate must be three different airports.")
+        problems = []
         if passengers > AIRCRAFT_PROFILES[aircraft].seats:
             problems.append(f"A {aircraft} has {AIRCRAFT_PROFILES[aircraft].seats} seats; "
                             f"you entered {passengers} passengers.")
@@ -104,28 +92,36 @@ def _read_request() -> dict | None:
         if problems:
             return None
         st.session_state.fuel_request = {
-            "departure": codes["Departure"], "destination": codes["Destination"],
-            "alternate": codes["Alternate"], "aircraft": aircraft, "flight_level": flight_level,
+            "aircraft": aircraft, "flight_level": flight_level,
             "passengers": int(passengers), "bags": int(bags), "cargo_kg": float(cargo_kg),
             "extra_kg": float(extra_kg),
         }
-        st.session_state.selected_airports = {**shared, **codes}
-    return st.session_state.get("fuel_request")
+    # The scenario starts from the defaults above until the form is submitted once;
+    # the airports always follow the sidebar.
+    scenario = st.session_state.get("fuel_request") or {
+        "aircraft": defaults["fuel_aircraft"], "flight_level": defaults["fuel_flight_level"],
+        "passengers": defaults["fuel_passengers"], "bags": defaults["fuel_bags"],
+        "cargo_kg": float(defaults["fuel_cargo"]), "extra_kg": float(defaults["fuel_extra"]),
+    }
+    return {**scenario, "departure": route["departure"], "destination": route["destination"],
+            "alternate": route["alternate"]}
 
 
 # ---------------------------------------------------------------- charts ----
 
 def _breakdown_chart(plan: FuelPlan) -> go.Figure:
-    parts = [(name, kg) for name, kg in plan.breakdown() if kg > 0]
+    parts = sorted(((name, kg) for name, kg in plan.breakdown() if kg > 0), key=lambda part: part[1], reverse=True)
+    biggest_name, biggest_kg = parts[0]
     fig = go.Figure(go.Bar(
-        x=[kg for _, kg in parts], y=[name for name, _ in parts], orientation="h",
+        x=[kg for _, kg in parts], y=[name for name, _ in parts], orientation="h", marker_color="#3987e5",
         text=[f"{kg:,.0f} kg" for _, kg in parts], textposition="auto",
-        hovertemplate="%{y}: %{x:,.0f} kg<extra></extra>",
+        customdata=[kg / 0.8 for _, kg in parts],
+        hovertemplate="%{y}: %{x:,.0f} kg (≈ %{customdata:,.0f} litres)<extra></extra>",
     ))
     fig.update_layout(
-        title=f"Where the {plan.block_fuel_kg:,.0f} kg of block fuel goes",
-        xaxis_title="Fuel (kg)", yaxis_title="Fuel part", yaxis={"autorange": "reversed"},
-        margin={"t": 50, "b": 10}, height=340,
+        title=f"{biggest_name} is {biggest_kg / plan.block_fuel_kg:.0%} of the {plan.block_fuel_kg:,.0f} kg block fuel",
+        xaxis_title="Fuel (kg; ≈ 1.25 litres per kg)", yaxis_title="Fuel part", yaxis={"autorange": "reversed"},
+        height=340,
     )
     return fig
 
@@ -139,7 +135,7 @@ def _heights_chart(rows: pd.DataFrame, chosen_fl: int) -> go.Figure:
     """
     chosen = rows.loc[rows["flight_level"] == chosen_fl, "block_fuel_kg"].iloc[0]
     difference = rows["block_fuel_kg"] - chosen
-    colours = ["#9aa5b1" if fl == chosen_fl else ("#d62728" if d > 0 else "#2ca02c")
+    colours = [OTHER if fl == chosen_fl else (HEAD_COLOUR if d > 0 else TAIL_COLOUR)
                for fl, d in zip(rows["flight_level"], difference)]
     labels = ["your choice" if fl == chosen_fl else f"{d:+,.0f} kg"
               for fl, d in zip(rows["flight_level"], difference)]
@@ -150,14 +146,18 @@ def _heights_chart(rows: pd.DataFrame, chosen_fl: int) -> go.Figure:
         hovertemplate=("%{x}<br>%{y:+,.0f} kg compared with your choice<br>Block fuel: %{customdata[0]:,.0f} kg"
                        "<br>Average headwind: %{customdata[1]:+.0f} kt<extra></extra>"),
     ))
-    fig.add_hline(y=0, line_color="grey")
+    fig.add_hline(y=0, line_color=AXIS)
     limit = max(difference.abs().max(), 1) * 1.3  # same room above and below zero, plus space for labels
+    best = rows.loc[rows["block_fuel_kg"].idxmin()]
+    saving = chosen - best["block_fuel_kg"]
+    title = (f"FL{int(best['flight_level']):03d} would save {saving:,.0f} kg compared with FL{chosen_fl:03d}"
+             if saving > 1 else f"FL{chosen_fl:03d} already needs the least fuel (live winds)")
     fig.update_layout(
-        title=f"Fuel at other cruise heights compared with FL{chosen_fl:03d} (live winds)",
+        title=title,
         xaxis_title="Cruise height (flight level)",
-        yaxis_title=f"Block fuel compared with FL{chosen_fl:03d} (kg)",
+        yaxis_title=f"Block fuel vs FL{chosen_fl:03d} (kg; blue = less)",
         yaxis={"range": [-limit, limit], "zeroline": False},
-        margin={"t": 50, "b": 10}, height=340,
+        height=340,
     )
     return fig
 
@@ -165,11 +165,8 @@ def _heights_chart(rows: pd.DataFrame, chosen_fl: int) -> go.Figure:
 # ---------------------------------------------------------------- page ----
 
 def render() -> None:
-    st.header("Fuel planner (educational estimate)")
-    st.write(
-        "How much fuel a flight needs, using the **real distance** between two airports and the **real "
-        "wind** at cruise height, with an aircraft and load you choose."
-    )
+    hero("Fuel planner (educational estimate)", "How much fuel the flight needs, from the real distance "
+         "and the real wind at cruise height, with an aircraft and load you choose.", kicker="Brief · Step 4")
     st.caption("⚠️ Simplified textbook method with rounded aircraft numbers. Not for real flight planning.")
 
     request = _read_request()
@@ -251,8 +248,14 @@ def render() -> None:
     heights = pd.DataFrame(heights)
 
     left, right = st.columns(2)
-    left.plotly_chart(_breakdown_chart(plan), width="stretch")
-    right.plotly_chart(_heights_chart(heights, request["flight_level"]), width="stretch")
+    with left:
+        chart(_breakdown_chart(plan), pd.DataFrame(
+            [{"Part": name, "Fuel (kg)": round(kg), "Fuel (litres)": round(kg / 0.8)} for name, kg in plan.breakdown()]),
+            key="fuel_breakdown")
+    with right:
+        chart(_heights_chart(heights, request["flight_level"]), heights.rename(columns={
+            "flight_level": "Flight level", "headwind_kt": "Average headwind (kt)", "block_fuel_kg": "Block fuel (kg)"}).round(1),
+            key="fuel_heights")
     best = heights.loc[heights["block_fuel_kg"].idxmin()]
     saving = plan.block_fuel_kg - best["block_fuel_kg"]
     if saving > 1:

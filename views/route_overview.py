@@ -14,33 +14,37 @@ import math
 from datetime import datetime, timezone
 
 import pandas as pd
+import plotly.graph_objects as go
 import pydeck as pdk
 import streamlit as st
 
 from weather_app.client import AviationWeatherClient, WeatherClient
 from weather_app.config import get_api_key
 from weather_app.glossary import GLOSSARY
-from weather_app.reports import FLIGHT_CATEGORIES, UNKNOWN_CATEGORY, clean_icao_code
+from weather_app.reports import FLIGHT_CATEGORIES, UNKNOWN_CATEGORY
 from weather_app.route import Route, great_circle_nm
 from weather_app.storage import MetarStore
 
-from .common import age_text, show_glossary
+from .common import age_text, get_route, route_missing_notice, show_glossary
+from .theme import BLUE_RAMP, CATEGORY_STYLE, OTHER, TEXT, chart, empty_state, hero, rgb, status_badge
 
 KT_PER_MPS = 1 / 0.514444
 API_ERRORS = (ConnectionError, PermissionError, LookupError, RuntimeError, ValueError)
 
-# Map colours (RGB). Airports use the same traffic-light colours as the 🟢🔵🔴🟣 emojis.
-CATEGORY_COLOURS = {"VFR": [46, 160, 67], "MVFR": [31, 119, 180], "IFR": [214, 39, 40], "LIFR": [170, 0, 170]}
-UNKNOWN_COLOUR = [150, 150, 150]
+# Map colours (RGB), from the shared palette in views/theme.py (same colours as the category badges).
+CATEGORY_COLOURS = {code: rgb(style["colour"])[:3] for code, style in CATEGORY_STYLE.items()}
+UNKNOWN_COLOUR = rgb(OTHER)[:3]
+_RAMP = [tuple(rgb(colour)[:3]) for colour in BLUE_RAMP]
 # Colour scales for the weather dots: (value, colour) stops, blended in between.
+# Temperature diverges around 10 °C (blue = colder, red = warmer, grey in the middle);
+# wind and cloud are magnitudes, so they use one blue ramp (darker = less, lighter = more).
 DOT_SCALES = {
     "Temperature": {"column": "temperature_c", "unit": "°C", "stops": [
-        (-10, (49, 54, 149)), (0, (116, 173, 209)), (10, (171, 217, 233)),
-        (20, (253, 174, 97)), (30, (215, 48, 39))]},
+        (-10, (57, 135, 229)), (10, (137, 135, 129)), (30, (230, 103, 103))]},
     "Wind": {"column": "wind_kt", "unit": "kt", "stops": [
-        (0, (26, 152, 80)), (15, (254, 224, 139)), (30, (215, 48, 39))]},
+        (0, _RAMP[1]), (10, _RAMP[2]), (20, _RAMP[3]), (30, _RAMP[5])]},
     "Cloud cover": {"column": "clouds_pct", "unit": "%", "stops": [
-        (0, (135, 206, 250)), (100, (90, 90, 90))]},
+        (0, _RAMP[1]), (50, _RAMP[3]), (100, _RAMP[5])]},
 }
 
 
@@ -120,55 +124,25 @@ def _airport_tooltip(metar, extra: str = "") -> str:
 
 
 def _read_request() -> dict | None:
-    """Form for the route. Remembers the last valid request; shares codes with the Airport weather page."""
-    shared = st.session_state.get("selected_airports", {})
+    """Airports from the sidebar ('Your flight', validated there) plus this page's two sliders."""
+    route = get_route()
+    if route is None:
+        route_missing_notice()
+        return None
     last = st.session_state.get("route_request", {})
     # Widgets get fixed keys with starting values set once. (Passing a changing value= instead
     # makes Streamlit treat it as a new widget, which can throw away what the user typed.)
-    defaults = {
-        "route_departure": last.get("departure", shared.get("Departure", "LEMD")),
-        "route_destination": last.get("destination", shared.get("Destination", "EGLL")),
-        "route_point_count": last.get("point_count", 6),
-        "route_corridor_nm": last.get("corridor_nm", 50),
-    }
-    for key, value in defaults.items():
-        st.session_state.setdefault(key, value)
+    st.session_state.setdefault("route_point_count", last.get("point_count", 6))
+    st.session_state.setdefault("route_corridor_nm", last.get("corridor_nm", 50))
 
-    with st.form("route_form"):
-        left, right = st.columns(2)
-        departure = left.text_input("Departure airport (ICAO code)", key="route_departure",
-                                    max_chars=4, help=GLOSSARY["ICAO code"])
-        destination = right.text_input("Destination airport (ICAO code)", key="route_destination",
-                                       max_chars=4, help=GLOSSARY["ICAO code"])
-        left, right = st.columns(2)
-        point_count = left.slider("Weather points along the route", 3, 12, key="route_point_count",
-                                  help="Including departure and destination. Each point is one OpenWeatherMap request.")
-        corridor_nm = right.slider("Show airports within this distance of the route (nm)", 10, 150, step=10,
-                                   key="route_corridor_nm", help=GLOSSARY["Nautical mile (nm)"])
-        submitted = st.form_submit_button("Show route", type="primary")
-
-    if submitted:
-        problems = []
-        try:
-            departure = clean_icao_code(departure)
-        except ValueError as exc:
-            problems.append(f"Departure: {exc}")
-        try:
-            destination = clean_icao_code(destination)
-        except ValueError as exc:
-            problems.append(f"Destination: {exc}")
-        if not problems and departure == destination:
-            problems.append("Departure and destination must be two different airports.")
-        for problem in problems:
-            st.error(problem)
-        if problems:
-            return None
-        st.session_state.route_request = {"departure": departure, "destination": destination,
-                                          "point_count": point_count, "corridor_nm": corridor_nm}
-        # Keep the Airport weather page in step with the route the user is looking at.
-        st.session_state.selected_airports = {**shared, "Departure": departure, "Destination": destination}
-        st.session_state.selected_airports.setdefault("Alternate", "LFPG")
-    return st.session_state.get("route_request")
+    left, right = st.columns(2)
+    point_count = left.slider("Weather points along the route", 3, 12, key="route_point_count",
+                              help="Including departure and destination. Each point is one OpenWeatherMap request.")
+    corridor_nm = right.slider("Show airports within this distance of the route (nm)", 10, 150, step=10,
+                               key="route_corridor_nm", help=GLOSSARY["Nautical mile (nm)"])
+    st.session_state.route_request = {"departure": route["departure"], "destination": route["destination"],
+                                      "point_count": point_count, "corridor_nm": corridor_nm}
+    return st.session_state.route_request
 
 
 def _save_endpoint_metars(metars, fetched_at) -> None:
@@ -181,14 +155,42 @@ def _save_endpoint_metars(metars, fetched_at) -> None:
             st.error(f"Could not save METAR history for {metar.icao}: {exc}")
 
 
+def _temperature_profile(profile: pd.DataFrame, dep_code: str, dest_code: str) -> go.Figure:
+    first, last = profile["temperature_c"].iloc[0], profile["temperature_c"].iloc[-1]
+    trend = "warmer" if last > first + 0.5 else ("colder" if last < first - 0.5 else "about the same")
+    fig = go.Figure(go.Scatter(
+        x=profile["distance_nm"], y=profile["temperature_c"], mode="lines+markers", line={"color": "#3987e5"},
+        customdata=(profile["distance_nm"] * 1.852).round(),
+        hovertemplate="%{x:,.0f} nm (%{customdata:,.0f} km) from departure<br>%{y:.1f} °C<extra></extra>",
+    ))
+    for index in (0, len(profile) - 1):  # label only the two ends
+        fig.add_annotation(x=profile["distance_nm"].iloc[index], y=profile["temperature_c"].iloc[index],
+                           text=f"{profile['temperature_c'].iloc[index]:.0f} °C", showarrow=False, yshift=14,
+                           font={"color": TEXT})
+    fig.update_layout(title=f"{dest_code} is {trend} than {dep_code}: {first:.0f} → {last:.0f} °C",
+                      xaxis_title="Distance from departure (nm; 1 nm = 1.852 km)", yaxis_title="Temperature (°C)")
+    return fig
+
+
+def _wind_profile(profile: pd.DataFrame, dep_code: str) -> go.Figure:
+    strongest = profile.loc[profile["wind_kt"].idxmax()]
+    fig = go.Figure(go.Bar(
+        x=profile["distance_nm"], y=profile["wind_kt"], marker_color="#3987e5",
+        customdata=(profile["wind_kt"] * 1.852).round(),
+        hovertemplate="%{x:,.0f} nm from departure<br>%{y:.0f} kt (%{customdata:.0f} km/h)<extra></extra>",
+    ))
+    fig.update_layout(title=f"Strongest surface wind: {strongest['wind_kt']:.0f} kt, "
+                            f"{strongest['distance_nm']:,.0f} nm from {dep_code}",
+                      xaxis_title="Distance from departure (nm; 1 nm = 1.852 km)",
+                      yaxis_title="Surface wind (kt; 1 kt = 1.852 km/h)", yaxis_rangemode="tozero")
+    return fig
+
+
 # ---------------------------------------------------------------- page ----
 
 def render() -> None:
-    st.header("Route overview")
-    st.write(
-        "Enter two airports to see the direct (**great circle**) route on a map, the current weather "
-        "at points along it, and the airports near the route you could divert to. All data is live."
-    )
+    hero("Route overview", "The direct (great circle) route of your flight on a map, the current weather "
+         "along it and the airports near it you could divert to. All data is live.", kicker="Brief · Step 2")
     request = _read_request()
     if not request:
         return
@@ -263,8 +265,10 @@ def render() -> None:
     # ---- headline numbers
     cols = st.columns(4)
     cols[0].metric("Distance", f"{route.distance_nm:,.0f} nm", help=f"{route.distance_km:,.0f} km. {GLOSSARY['Great circle']}")
-    cols[1].metric(f"{dep_code} now", f"{dep.category_info['emoji']} {dep.flight_category}", help=dep.category_info["explanation"])
-    cols[2].metric(f"{dest_code} now", f"{dest.category_info['emoji']} {dest.flight_category}", help=dest.category_info["explanation"])
+    cols[1].metric(f"{dep_code} now", f"{CATEGORY_STYLE.get(dep.flight_category, {}).get('icon', '❔')} {dep.flight_category}",
+                   help=dep.category_info["explanation"])
+    cols[2].metric(f"{dest_code} now", f"{CATEGORY_STYLE.get(dest.flight_category, {}).get('icon', '❔')} {dest.flight_category}",
+                   help=dest.category_info["explanation"])
     cols[3].metric("Airports near the route", len(nearby), help=f"Reporting airports within {request['corridor_nm']} nm of the route.")
 
     # ---- map
@@ -276,51 +280,63 @@ def render() -> None:
     path = [[lon, lat] for lat, lon in route.points(100)]
     layers = [
         pdk.Layer("PathLayer", [{"path": path, "tooltip": html.escape(str(route))}], get_path="path",
-                  get_color=[0, 0, 0], width_min_pixels=3, wrap_longitude=True, pickable=True),
+                  get_color=[232, 238, 247], width_min_pixels=3, wrap_longitude=True, pickable=True),
         pdk.Layer("ScatterplotLayer", [
             {"position": [m.longitude, m.latitude], "color": _category_colour(m),
              "tooltip": _airport_tooltip(m, f"<br/>{off:.0f} nm from route · {to_dest:.0f} nm from {html.escape(dest_code)}")}
             for m, off, to_dest in nearby
         ], get_position="position", get_fill_color="color", get_line_color=[255, 255, 255],
-            stroked=True, line_width_min_pixels=1, radius_units="pixels", get_radius=5, pickable=True),
+            stroked=True, line_width_min_pixels=1, radius_units="pixels", get_radius=5,
+            radius_min_pixels=5, radius_max_pixels=5, pickable=True),
         # NaN (e.g. no cloud report) is not valid JSON for the map, so turn it into None first.
         pdk.Layer("ScatterplotLayer", profile.astype(object).where(profile.notna(), None).to_dict("records"),
-                  get_position="[longitude, latitude]", get_fill_color="color", get_line_color=[0, 0, 0],
-                  stroked=True, line_width_min_pixels=2, radius_units="pixels", get_radius=11, pickable=True),
+                  get_position="[longitude, latitude]", get_fill_color="color", get_line_color=[232, 238, 247],
+                  stroked=True, line_width_min_pixels=2, radius_units="pixels", get_radius=11,
+            radius_min_pixels=11, radius_max_pixels=11, pickable=True),
         pdk.Layer("ScatterplotLayer", [
             {"position": [m.longitude, m.latitude], "color": _category_colour(m), "label": m.icao,
              "tooltip": _airport_tooltip(m, f"<br/>{role}")}
             for m, role in ((dep, "Departure"), (dest, "Destination"))
-        ], get_position="position", get_fill_color="color", get_line_color=[0, 0, 0], stroked=True,
-            line_width_min_pixels=3, radius_units="pixels", get_radius=8, pickable=True),
+        ], get_position="position", get_fill_color="color", get_line_color=[232, 238, 247], stroked=True,
+            line_width_min_pixels=3, radius_units="pixels", get_radius=8,
+            radius_min_pixels=8, radius_max_pixels=8, pickable=True),
         pdk.Layer("TextLayer", [{"position": [m.longitude, m.latitude], "label": m.icao} for m in (dep, dest)],
-                  get_position="position", get_text="label", get_size=15, get_color=[0, 0, 0],
+                  get_position="position", get_text="label", get_size=15, get_color=[232, 238, 247],
                   get_pixel_offset=[0, -22], font_weight=700),
     ]
     view = (pdk.ViewState(latitude=(dep.latitude + dest.latitude) / 2, longitude=path[50][0], zoom=1.5)
             if route.crosses_antimeridian else _view_state(route.bounding_box(margin_nm=request["corridor_nm"])))
-    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view, map_style="light",
+    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view, map_style="dark",
                              tooltip={"html": "{tooltip}", "style": {"fontSize": "13px"}}))
-    legend = " · ".join(f"{FLIGHT_CATEGORIES[c]['emoji']} {c}" for c in CATEGORY_COLOURS)
+    legend = " ".join(status_badge(c) for c in CATEGORY_COLOURS)
     low, high = scale["stops"][0][0], scale["stops"][-1][0]
-    st.caption(
-        f"**Black line:** direct route. **Large dots with a black ring:** weather now, coloured by "
+    st.markdown(
+        f"**White line:** direct route. **Large dots with a white ring:** weather now, coloured by "
         f"{colour_by.lower()} (from {low} {scale['unit']} to {high} {scale['unit']} and above). "
-        f"**Small dots:** airports near the route, coloured by flying conditions ({legend}). "
-        "Hover over anything for details."
+        f"**Small dots:** airports near the route, coloured by flying conditions: {legend} "
+        "Hover over anything for details.", unsafe_allow_html=True,
     )
     for label, message in weather_errors.items():
         st.warning(f"Weather point at {label}: {message}")
 
     # ---- weather profile along the route
-    if not profile.empty:
+    if profile.empty:
+        empty_state("Weather along the route is not available right now (OpenWeatherMap).")
+    else:
         st.subheader("Weather along the route")
-        chart = profile.rename(columns={"distance_nm": "Distance from departure (nm)"})
+        table = pd.DataFrame({
+            "Distance from departure (nm)": profile["distance_nm"],
+            "Distance (km)": (profile["distance_nm"] * 1.852).round().astype(int),
+            "Temperature (°C)": profile["temperature_c"].round(1),
+            "Wind (kt)": profile["wind_kt"].round(1),
+            "Wind (km/h)": (profile["wind_kt"] * 1.852).round().astype(int),
+            "Conditions": profile["description"],
+        })
         left, right = st.columns(2)
         with left:
-            st.line_chart(chart, x="Distance from departure (nm)", y="temperature_c", y_label="Temperature (°C)")
+            chart(_temperature_profile(profile, dep_code, dest_code), table, height=340, key="route_temperature")
         with right:
-            st.bar_chart(chart, x="Distance from departure (nm)", y="wind_kt", y_label="Wind speed at the surface (kt)")
+            chart(_wind_profile(profile, dep_code), table, height=340, key="route_wind")
         st.caption("Current surface conditions from OpenWeatherMap. Winds at cruise altitude are on the Winds aloft page.")
 
     # ---- alternates

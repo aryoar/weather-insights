@@ -8,6 +8,8 @@ import streamlit as st
 import pydeck as pdk
 from weather_app.airports import assess_airport, get_daylight, get_metars, load_runways
 
+from .theme import SUITABILITY_STYLE, hero, rgb, status_badge
+
 RUNWAY_FILE = Path("data/runways.csv")
 
 
@@ -113,12 +115,8 @@ def _raw_runways():
 
 
 def render():
-    st.title("Airport Suitability — Tab 4")
-    st.write(
-        "This educational view compares airport weather using live METAR observations, "
-        "runway headings from OurAirports, and sunrise/sunset from OpenWeatherMap. "
-        "It is not official flight-planning advice."
-    )
+    hero("Airport suitability", "Can each airport of your flight be used right now? Live METARs, runway "
+         "headings from OurAirports and sunrise/sunset from OpenWeatherMap.", kicker="Brief · Step 3")
     codes = _route_codes()
     if not codes:
         st.info("Choose valid airport codes to continue.")
@@ -185,7 +183,8 @@ def render():
     points = [
         {
             "icao": a.code, "lat": a.latitude, "lon": a.longitude,
-            "color": a.color, "status": a.status,
+            "color": rgb(SUITABILITY_STYLE[a.status]["colour"]),
+            "status": f"{SUITABILITY_STYLE[a.status]['icon']} {a.status}",
         }
         for a in assessments if a.latitude is not None and a.longitude is not None
     ]
@@ -193,11 +192,12 @@ def render():
         lat_avg = sum(p["lat"] for p in points) / len(points)
         lon_avg = sum(p["lon"] for p in points) / len(points)
         st.pydeck_chart(pdk.Deck(
-            map_style=None,
+            map_style="dark",
             initial_view_state=pdk.ViewState(latitude=lat_avg, longitude=lon_avg, zoom=4, pitch=0),
             layers=[pdk.Layer(
                 "ScatterplotLayer", data=points, get_position="[lon, lat]",
-                get_fill_color="color", get_radius=25000, radius_min_pixels=8,
+                get_fill_color="color", get_radius=25000, radius_min_pixels=8, radius_max_pixels=8,
+                stroked=True, get_line_color=[232, 238, 247], line_width_min_pixels=1,
                 pickable=True,
             )],
             tooltip={"html": "<b>{icao}</b><br>{status}"},
@@ -205,10 +205,12 @@ def render():
     else:
         st.warning("No airport coordinates available for the map.")
 
-    st.caption("Green = meets our checked conditions; yellow = caution; red = blocked in this model/scenario; grey = unknown.")
+    st.markdown(" ".join(status_badge(status) for status in SUITABILITY_STYLE)
+                + " &nbsp;Usable = meets our checked conditions; Caution = check further; Not usable = blocked in "
+                "this model or scenario; Unknown = not enough data.", unsafe_allow_html=True)
     for airport in assessments:
         with st.container(border=True):
-            st.subheader(f"{airport.code} — {airport.status}")
+            st.markdown(f"#### {airport.code} &nbsp; {status_badge(airport.status)}", unsafe_allow_html=True)
             if airport.flight_category:
                 st.write(f"METAR flight category: {airport.flight_category}")
             if airport.crosswind_kt is not None:
